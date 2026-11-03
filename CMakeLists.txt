@@ -41,9 +41,9 @@ else()
     set(EPAPER_IMAGE_BUILD_TOOLS_DEFAULT OFF)
 endif()
 option(EPAPER_IMAGE_BUILD_TOOLS "Build the convert tool" ${EPAPER_IMAGE_BUILD_TOOLS_DEFAULT})
-# The randomized API harness (tests/fuzz.c), for sanitizer runs; needs
+# The randomised API harness (tests/fuzz.c), for sanitizer runs; needs
 # EPAPER_IMAGE_BUILD_TESTS. Not built by default or under ESP-IDF.
-option(EPAPER_IMAGE_BUILD_FUZZ "Build the randomized API harness" OFF)
+option(EPAPER_IMAGE_BUILD_FUZZ "Build the randomised API harness" OFF)
 option(EPAPER_IMAGE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 # Main library target (static only: nothing is exported for a shared build)

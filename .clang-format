@@ -58,7 +58,7 @@ SpaceBeforeParens: ControlStatements
 SpaceInEmptyParentheses: false
 SpacesInContainerLiterals: false
 
-# Alignment (minimize to avoid unrelated line changes in diffs)
+# Alignment (minimise to avoid unrelated line changes in diffs)
 AlignConsecutiveAssignments: None
 AlignConsecutiveDeclarations: None
 AlignOperands: DontAlign

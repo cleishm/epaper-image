@@ -22,11 +22,11 @@ def test_spectra6_default_is_photo_measured(spectra6):
 
 
 def test_unknown_builtin_table():
-    assert builtin_tables("grayscale16") == []
+    assert builtin_tables("greyscale16") == []
     with pytest.raises(KeyError):
         builtin_palette("spectra6", "nope")
     with pytest.raises(KeyError):
-        builtin_palette("grayscale16")
+        builtin_palette("greyscale16")
 
 
 def test_duplicate_nominal_rejected():

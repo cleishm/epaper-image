@@ -61,7 +61,7 @@ add_test(NAME cxx_header COMMAND epaper_image_cxx_header_test)
 
 set(epi_test_targets epaper_image_tests epaper_image_cxx_header_test)
 
-# The randomized API harness (see tests/fuzz.c); run it with sanitizers.
+# The randomised API harness (see tests/fuzz.c); run it with sanitizers.
 if(EPAPER_IMAGE_BUILD_FUZZ)
     add_executable(epaper_image_fuzz fuzz.c)
     target_link_libraries(epaper_image_fuzz PRIVATE epaper_image::epaper_image)

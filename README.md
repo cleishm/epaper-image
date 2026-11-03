@@ -262,7 +262,7 @@ CMake options:
 | `EPAPER_IMAGE_BUILD_TESTS` | on when top level | Build the test suite |
 | `EPAPER_IMAGE_BUILD_TOOLS` | on when top level, off under Emscripten | Build `tools/convert` |
 | `EPAPER_IMAGE_WARNINGS_AS_ERRORS` | off | Treat compiler warnings in the library as errors |
-| `EPAPER_IMAGE_BUILD_FUZZ` | off | Build the randomized API test, for sanitizer runs (needs `EPAPER_IMAGE_BUILD_TESTS`) |
+| `EPAPER_IMAGE_BUILD_FUZZ` | off | Build the randomised API test, for sanitizer runs (needs `EPAPER_IMAGE_BUILD_TESTS`) |
 | `EPAPER_IMAGE_BUILD_DOCS` | off | Add a `docs` target that runs Doxygen |
 
 ```bash
