@@ -248,11 +248,11 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
   given untrusted files.
 - `tools/panel` shows converted frames on a real panel during development.
   It has ESP-IDF firmware that receives a frame over USB serial, and `send.py`,
-  which sends it. See [tools/panel/README.md](tools/panel/README.md) for the
+  which sends it. See [tools/panel/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panel/README.md) for the
   supported boards.
 - `tools/panelgen` generates the tables for colour panels and for grey
   panels shipped as const calibrations. See
-  [tools/panelgen/README.md](tools/panelgen/README.md).
+  [tools/panelgen/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panelgen/README.md).
 
 ## Building and testing
 
@@ -274,7 +274,7 @@ ctest --test-dir build --output-on-failure
 
 The tests use [Unity](https://github.com/ThrowTheSwitch/Unity), downloaded when
 configuring. The same tests run on ESP32 targets, normally under QEMU, using the
-ESP-IDF test app in [tests/esp_idf](tests/esp_idf/README.md).
+ESP-IDF test app in [tests/esp_idf](https://github.com/cleishm/epaper-image/blob/main/tests/esp_idf/README.md).
 
 For WASM, configure with the Emscripten toolchain and run the tests under Node:
 
@@ -296,10 +296,10 @@ CI also checks the formatting of the C and C++ sources, using clang-format
 - To generate the API reference with Doxygen, configure with
   `-DEPAPER_IMAGE_BUILD_DOCS=ON` and build the `docs` target. You can also read
   the comments in the header,
-  [include/epaper_image.h](include/epaper_image.h).
+  [include/epaper_image.h](https://github.com/cleishm/epaper-image/blob/main/include/epaper_image.h).
 
 ## License
 
-MIT; see [LICENSE](LICENSE). The resampler's coefficient computation is derived
+MIT; see [LICENSE](https://github.com/cleishm/epaper-image/blob/main/LICENSE). The resampler's coefficient computation is derived
 from [Pillow](https://python-pillow.org)'s resampling code, which is under the
 MIT-CMU License (reproduced in LICENSE).
