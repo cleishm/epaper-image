@@ -1,0 +1,1354 @@
+{
+ "gdey075t7_grey4": {
+  "nominal": [
+   [
+    0,
+    0,
+    0
+   ],
+   [
+    85,
+    85,
+    85
+   ],
+   [
+    170,
+    170,
+    170
+   ],
+   [
+    255,
+    255,
+    255
+   ]
+  ],
+  "perceived": [
+   [
+    58,
+    58,
+    58
+   ],
+   [
+    102,
+    102,
+    102
+   ],
+   [
+    175,
+    175,
+    175
+   ],
+   [
+    198,
+    198,
+    198
+   ]
+  ],
+  "codes": [
+   0,
+   1,
+   2,
+   3
+  ],
+  "photocal": {
+   "format": "photocal-grey/1",
+   "date": "2026-10-31",
+   "mode": "grey4",
+   "panel": "GDEY075T7 (UC8179)",
+   "waveform": "idfxx 8f0822d uc8179 register grey 20Hz \u00b115V (default)",
+   "chart_version": 1,
+   "chart_rgb_sha256_16": "fae0538427f1969f",
+   "photos": [
+    "IMG_3596.DNG",
+    "IMG_3597.DNG",
+    "IMG_3598.DNG"
+   ],
+   "white_srgb8": [
+    198,
+    198,
+    198
+   ],
+   "white_source": "neutral at the E1004 white's Y (convention)",
+   "rule": "Y/Y_white per level = mean over its solid patches (pixels >= 4 px from any other level) of the flat-fielded camera-matrix Y, relative to the lightest level measured the same way inside the chart; photos averaged. Measured sRGB8 is neutralised relative to the lightest level: linear RGB = (Y/Y_white) * linear(white_srgb8), rounded; the camera's chroma is reported (camera_lab_rel_white), not used.",
+   "levels": [
+    {
+     "index": 0,
+     "code": 0,
+     "nominal": [
+      0,
+      0,
+      0
+     ],
+     "y_rel": 0.07485,
+     "y_rel_photos": [
+      0.07137,
+      0.08637,
+      0.0668
+     ],
+     "y_rel_photo_std": 0.00836,
+     "y_rel_by_surround": {
+      "dark": 0.07704,
+      "mid": 0.07549,
+      "light": 0.07201
+     },
+     "lstar": 32.89,
+     "camera_lab_rel_white": [
+      32.82,
+      1.55,
+      -4.42
+     ],
+     "measured_srgb8": [
+      58,
+      58,
+      58
+     ],
+     "y_rel_srgb8_q16": 0.07492,
+     "n_px_per_photo": 21124,
+     "n_patches": 3
+    },
+    {
+     "index": 1,
+     "code": 1,
+     "nominal": [
+      85,
+      85,
+      85
+     ],
+     "y_rel": 0.23313,
+     "y_rel_photos": [
+      0.23068,
+      0.23661,
+      0.2321
+     ],
+     "y_rel_photo_std": 0.00253,
+     "y_rel_by_surround": {
+      "dark": 0.23648,
+      "mid": 0.23127,
+      "light": 0.23163
+     },
+     "lstar": 55.39,
+     "camera_lab_rel_white": [
+      55.39,
+      0.41,
+      -3.28
+     ],
+     "measured_srgb8": [
+      102,
+      102,
+      102
+     ],
+     "y_rel_srgb8_q16": 0.23529,
+     "n_px_per_photo": 9408,
+     "n_patches": 3
+    },
+    {
+     "index": 2,
+     "code": 2,
+     "nominal": [
+      170,
+      170,
+      170
+     ],
+     "y_rel": 0.75739,
+     "y_rel_photos": [
+      0.75266,
+      0.76154,
+      0.75798
+     ],
+     "y_rel_photo_std": 0.00365,
+     "y_rel_by_surround": {
+      "dark": 0.7434,
+      "mid": 0.75686,
+      "light": 0.77191
+     },
+     "lstar": 89.74,
+     "camera_lab_rel_white": [
+      89.74,
+      -0.06,
+      -0.79
+     ],
+     "measured_srgb8": [
+      175,
+      175,
+      175
+     ],
+     "y_rel_srgb8_q16": 0.75912,
+     "n_px_per_photo": 9408,
+     "n_patches": 3
+    },
+    {
+     "index": 3,
+     "code": 3,
+     "nominal": [
+      255,
+      255,
+      255
+     ],
+     "y_rel": 1.0,
+     "y_rel_photos": [
+      1.0,
+      1.0,
+      1.0
+     ],
+     "y_rel_photo_std": 0.0,
+     "y_rel_by_surround": {
+      "dark": 0.9879,
+      "mid": 1.00412,
+      "light": 1.00798
+     },
+     "lstar": 100.0,
+     "camera_lab_rel_white": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "measured_srgb8": [
+      198,
+      198,
+      198
+     ],
+     "y_rel_srgb8_q16": 1.0,
+     "n_px_per_photo": 18816,
+     "n_patches": 3
+    }
+   ],
+   "photo_stats": [
+    {
+     "name": "IMG_3596",
+     "flat_field_rms": 0.01742,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.992,
+     "reg_quadrant_median_p95_max": [
+      0.102,
+      0.329,
+      0.522
+     ]
+    },
+    {
+     "name": "IMG_3597",
+     "flat_field_rms": 0.01796,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.9879,
+     "reg_quadrant_median_p95_max": [
+      0.085,
+      0.302,
+      0.412
+     ]
+    },
+    {
+     "name": "IMG_3598",
+     "flat_field_rms": 0.0162,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.989,
+     "reg_quadrant_median_p95_max": [
+      0.088,
+      0.31,
+      0.444
+     ]
+    }
+   ],
+   "mixing": [
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.4854,
+     "measured": 0.4175,
+     "ratio": 0.8602
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5224,
+     "measured": 0.4468,
+     "ratio": 0.8552
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.4855,
+     "measured": 0.4154,
+     "ratio": 0.8557
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5262,
+     "measured": 0.4535,
+     "ratio": 0.8617
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.4711,
+     "measured": 0.4011,
+     "ratio": 0.8514
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5329,
+     "measured": 0.4573,
+     "ratio": 0.8583
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5341,
+     "measured": 0.4681,
+     "ratio": 0.8763
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.4885,
+     "measured": 0.4276,
+     "ratio": 0.8753
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5509,
+     "measured": 0.4938,
+     "ratio": 0.8962
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.4519,
+     "measured": 0.3946,
+     "ratio": 0.8732
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5101,
+     "measured": 0.445,
+     "ratio": 0.8725
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.4905,
+     "measured": 0.4222,
+     "ratio": 0.8609
+    },
+    {
+     "kind": "checker",
+     "a": 0,
+     "b": 1,
+     "size": 1,
+     "rect": [
+      624,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.154,
+     "measured": 0.1311,
+     "ratio": 0.8534
+    },
+    {
+     "kind": "checker",
+     "a": 1,
+     "b": 2,
+     "size": 1,
+     "rect": [
+      176,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.4953,
+     "measured": 0.4771,
+     "ratio": 0.9634
+    },
+    {
+     "kind": "checker",
+     "a": 2,
+     "b": 3,
+     "size": 1,
+     "rect": [
+      304,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.8787,
+     "measured": 0.8824,
+     "ratio": 1.0042
+    },
+    {
+     "kind": "checker",
+     "a": 0,
+     "b": 3,
+     "size": 1,
+     "rect": [
+      432,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5374,
+     "measured": 0.4343,
+     "ratio": 0.808
+    },
+    {
+     "kind": "dots",
+     "a": 0,
+     "b": 3,
+     "size": null,
+     "rect": [
+      560,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.7687,
+     "measured": 0.7005,
+     "ratio": 0.9112
+    },
+    {
+     "kind": "dots",
+     "a": 3,
+     "b": 0,
+     "size": null,
+     "rect": [
+      48,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.2896,
+     "measured": 0.222,
+     "ratio": 0.7663
+    },
+    {
+     "kind": "hlines",
+     "a": 0,
+     "b": 3,
+     "size": null,
+     "rect": [
+      688,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5044,
+     "measured": 0.4175,
+     "ratio": 0.8278
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      48,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.4674,
+     "measured": 0.4044,
+     "ratio": 0.8651
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5161,
+     "measured": 0.4395,
+     "ratio": 0.8517
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      304,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5199,
+     "measured": 0.4603,
+     "ratio": 0.8854
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      432,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5058,
+     "measured": 0.444,
+     "ratio": 0.8777
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5014,
+     "measured": 0.437,
+     "ratio": 0.8718
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      688,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.4962,
+     "measured": 0.4394,
+     "ratio": 0.8857
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      112,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5421,
+     "measured": 0.4726,
+     "ratio": 0.8719
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      240,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5003,
+     "measured": 0.4382,
+     "ratio": 0.8761
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5126,
+     "measured": 0.4628,
+     "ratio": 0.9029
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      496,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.4995,
+     "measured": 0.4412,
+     "ratio": 0.8832
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      624,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5194,
+     "measured": 0.4586,
+     "ratio": 0.883
+    }
+   ],
+   "epi_ink_t": "{\n    {0, {0, 0, 0}, {58, 58, 58}},\n    {1, {85, 85, 85}, {102, 102, 102}},\n    {2, {170, 170, 170}, {175, 175, 175}},\n    {3, {255, 255, 255}, {198, 198, 198}},\n}",
+   "warnings": []
+  }
+ },
+ "gdey075t7_mono": {
+  "nominal": [
+   [
+    0,
+    0,
+    0
+   ],
+   [
+    255,
+    255,
+    255
+   ]
+  ],
+  "perceived": [
+   [
+    58,
+    58,
+    58
+   ],
+   [
+    198,
+    198,
+    198
+   ]
+  ],
+  "codes": [
+   0,
+   1
+  ],
+  "photocal": {
+   "format": "photocal-grey/1",
+   "date": "2026-10-31",
+   "mode": "mono",
+   "panel": "GDEY075T7 (UC8179)",
+   "waveform": "idfxx 148d5b8 (IMG_3590) / 858f67d (IMG_3600-3603) uc8179 OTP mono (full; mono path unchanged between)",
+   "chart_version": 1,
+   "chart_rgb_sha256_16": "318b67af85843753",
+   "photos": [
+    "IMG_3590.DNG",
+    "IMG_3600.DNG",
+    "IMG_3601.DNG",
+    "IMG_3602.DNG",
+    "IMG_3603.DNG"
+   ],
+   "white_srgb8": [
+    198,
+    198,
+    198
+   ],
+   "white_source": "neutral at the E1004 white's Y (convention)",
+   "rule": "Y/Y_white per level = mean over its solid patches (pixels >= 4 px from any other level) of the flat-fielded camera-matrix Y, relative to the lightest level measured the same way inside the chart; photos averaged. Measured sRGB8 is neutralised relative to the lightest level: linear RGB = (Y/Y_white) * linear(white_srgb8), rounded; the camera's chroma is reported (camera_lab_rel_white), not used.",
+   "levels": [
+    {
+     "index": 0,
+     "code": 0,
+     "nominal": [
+      0,
+      0,
+      0
+     ],
+     "y_rel": 0.07398,
+     "y_rel_photos": [
+      0.06975,
+      0.06489,
+      0.08659,
+      0.06286,
+      0.0858
+     ],
+     "y_rel_photo_std": 0.01023,
+     "y_rel_by_surround": {
+      "dark": 0.0737,
+      "mid": 0.07158,
+      "light": 0.07666
+     },
+     "lstar": 32.7,
+     "camera_lab_rel_white": [
+      32.59,
+      1.7,
+      -3.46
+     ],
+     "measured_srgb8": [
+      58,
+      58,
+      58
+     ],
+     "y_rel_srgb8_q16": 0.07492,
+     "n_px_per_photo": 41860,
+     "n_patches": 6
+    },
+    {
+     "index": 1,
+     "code": 1,
+     "nominal": [
+      255,
+      255,
+      255
+     ],
+     "y_rel": 1.0,
+     "y_rel_photos": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "y_rel_photo_std": 0.0,
+     "y_rel_by_surround": {
+      "dark": 0.98563,
+      "mid": 1.0033,
+      "light": 1.01107
+     },
+     "lstar": 100.0,
+     "camera_lab_rel_white": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "measured_srgb8": [
+      198,
+      198,
+      198
+     ],
+     "y_rel_srgb8_q16": 1.0,
+     "n_px_per_photo": 38905,
+     "n_patches": 6
+    }
+   ],
+   "photo_stats": [
+    {
+     "name": "IMG_3590",
+     "flat_field_rms": 0.0177,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.9911,
+     "reg_quadrant_median_p95_max": [
+      0.109,
+      0.357,
+      0.521
+     ]
+    },
+    {
+     "name": "IMG_3600",
+     "flat_field_rms": 0.01698,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.99,
+     "reg_quadrant_median_p95_max": [
+      0.091,
+      0.306,
+      0.473
+     ]
+    },
+    {
+     "name": "IMG_3601",
+     "flat_field_rms": 0.01734,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.9932,
+     "reg_quadrant_median_p95_max": [
+      0.079,
+      0.304,
+      0.418
+     ]
+    },
+    {
+     "name": "IMG_3602",
+     "flat_field_rms": 0.01709,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.9918,
+     "reg_quadrant_median_p95_max": [
+      0.081,
+      0.294,
+      0.444
+     ]
+    },
+    {
+     "name": "IMG_3603",
+     "flat_field_rms": 0.0195,
+     "empty_bins": 0,
+     "clipped_fraction": 0.0,
+     "white_in_chart_vs_surround": 0.9881,
+     "reg_quadrant_median_p95_max": [
+      0.092,
+      0.324,
+      0.486
+     ]
+    }
+   ],
+   "mixing": [
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.5016,
+     "measured": 0.3876,
+     "ratio": 0.7726
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5444,
+     "measured": 0.4237,
+     "ratio": 0.7783
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.5116,
+     "measured": 0.3977,
+     "ratio": 0.7775
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5476,
+     "measured": 0.4241,
+     "ratio": 0.7745
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      48,
+      64,
+      64
+     ],
+     "predicted": 0.4886,
+     "measured": 0.3717,
+     "ratio": 0.7607
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      112,
+      64,
+      64
+     ],
+     "predicted": 0.5456,
+     "measured": 0.4286,
+     "ratio": 0.7855
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5559,
+     "measured": 0.4392,
+     "ratio": 0.79
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.5063,
+     "measured": 0.408,
+     "ratio": 0.8057
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5851,
+     "measured": 0.4759,
+     "ratio": 0.8134
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.4602,
+     "measured": 0.3524,
+     "ratio": 0.7659
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      304,
+      64,
+      64
+     ],
+     "predicted": 0.5311,
+     "measured": 0.4001,
+     "ratio": 0.7534
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      368,
+      64,
+      64
+     ],
+     "predicted": 0.5066,
+     "measured": 0.3913,
+     "ratio": 0.7725
+    },
+    {
+     "kind": "checker",
+     "a": 0,
+     "b": 1,
+     "size": 1,
+     "rect": [
+      624,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.537,
+     "measured": 0.3747,
+     "ratio": 0.6977
+    },
+    {
+     "kind": "checker",
+     "a": 0,
+     "b": 1,
+     "size": 2,
+     "rect": [
+      176,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.537,
+     "measured": 0.4023,
+     "ratio": 0.7491
+    },
+    {
+     "kind": "dots",
+     "a": 0,
+     "b": 1,
+     "size": null,
+     "rect": [
+      304,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.7685,
+     "measured": 0.6649,
+     "ratio": 0.8652
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      432,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5284,
+     "measured": 0.3944,
+     "ratio": 0.7463
+    },
+    {
+     "kind": "dots",
+     "a": 1,
+     "b": 0,
+     "size": null,
+     "rect": [
+      560,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.3055,
+     "measured": 0.1973,
+     "ratio": 0.6459
+    },
+    {
+     "kind": "hlines",
+     "a": 0,
+     "b": 1,
+     "size": null,
+     "rect": [
+      48,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5039,
+     "measured": 0.3796,
+     "ratio": 0.7534
+    },
+    {
+     "kind": "vlines",
+     "a": 0,
+     "b": 1,
+     "size": null,
+     "rect": [
+      688,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5039,
+     "measured": 0.3751,
+     "ratio": 0.7443
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      48,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.498,
+     "measured": 0.3814,
+     "ratio": 0.7658
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      176,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5429,
+     "measured": 0.4178,
+     "ratio": 0.7695
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      304,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5287,
+     "measured": 0.409,
+     "ratio": 0.7736
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      432,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.524,
+     "measured": 0.4045,
+     "ratio": 0.772
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      560,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.55,
+     "measured": 0.4294,
+     "ratio": 0.7808
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      688,
+      176,
+      64,
+      64
+     ],
+     "predicted": 0.5382,
+     "measured": 0.4264,
+     "ratio": 0.7923
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      112,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5205,
+     "measured": 0.3982,
+     "ratio": 0.7652
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      240,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5358,
+     "measured": 0.4232,
+     "ratio": 0.7898
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      368,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5252,
+     "measured": 0.41,
+     "ratio": 0.7806
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      496,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5429,
+     "measured": 0.4171,
+     "ratio": 0.7684
+    },
+    {
+     "kind": "random",
+     "a": -1,
+     "b": -1,
+     "size": null,
+     "rect": [
+      624,
+      240,
+      64,
+      64
+     ],
+     "predicted": 0.5323,
+     "measured": 0.4088,
+     "ratio": 0.7682
+    }
+   ],
+   "epi_ink_t": "{\n    {0, {0, 0, 0}, {58, 58, 58}},\n    {1, {255, 255, 255}, {198, 198, 198}},\n}",
+   "warnings": []
+  }
+ }
+}

@@ -1,0 +1,54 @@
+# Build directories
+build/
+cmake-build-*/
+dist/
+.cache/
+
+# Documentation
+docs/html/
+docs/xml/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+
+# Out-of-tree builds
+build*/
+
+# Python (per-tool venvs)
+.venv/
+__pycache__/
+.pytest_cache/
+
+# tools/panel firmware (ESP-IDF)
+tools/panel/firmware-e1004/build/
+tools/panel/firmware-e1004/managed_components/
+tools/panel/firmware-e1004/sdkconfig
+tools/panel/firmware-e1004/sdkconfig.old
+tools/panel/firmware-e1004/dependencies.lock
+tools/panel/firmware-ee05/build/
+tools/panel/firmware-ee05/managed_components/
+tools/panel/firmware-ee05/sdkconfig
+tools/panel/firmware-ee05/sdkconfig.old
+tools/panel/firmware-ee05/dependencies.lock
+
+# tests/esp_idf test app (build*/ is covered above)
+tests/esp_idf/sdkconfig
+tests/esp_idf/sdkconfig.old
+tests/esp_idf/managed_components/
+tests/esp_idf/dependencies.lock

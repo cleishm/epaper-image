@@ -1,0 +1,6 @@
+# esp32s3 only (applied on top of sdkconfig.defaults), for running the suite
+# on real hardware such as the XIAO EE05.
+
+# The console is the native USB-Serial-JTAG port, not UART0.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+

@@ -1,0 +1,15 @@
+{
+ "_placeholder": "NOT MEASURED. Guessed GDEY075T7 levels so the grey tooling (panelgen and its tests) runs end to end without a calibration. Black is the E1004's photo-measured Y/Y_white (0.084); the grey4 mid levels (0.28, 0.55) are guesses; all neutral relative to the E1004 white (190, 200, 200), as photocal grey writes them. Replace with the output of `photocal.py grey` (e.g. tools/panelgen/measurements/gdey075t7-levels-2026-10-31.json).",
+ "gdey075t7_mono": {
+  "nominal": [[0, 0, 0], [255, 255, 255]],
+  "perceived": [[59, 62, 62], [190, 200, 200]],
+  "codes": [0, 1],
+  "placeholder": true
+ },
+ "gdey075t7_grey4": {
+  "nominal": [[0, 0, 0], [85, 85, 85], [170, 170, 170], [255, 255, 255]],
+  "perceived": [[59, 62, 62], [106, 112, 112], [145, 153, 153], [190, 200, 200]],
+  "codes": [0, 1, 2, 3],
+  "placeholder": true
+ }
+}

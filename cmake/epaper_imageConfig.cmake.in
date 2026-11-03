@@ -1,0 +1,5 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/epaper_imageTargets.cmake")
+
+check_required_components(epaper_image)

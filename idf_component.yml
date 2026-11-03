@@ -1,0 +1,14 @@
+version: "0.1.0"
+description: "Image conversion for e-paper panels: streaming resampling, tone adjustment, palette matching and error diffusion"
+url: "https://github.com/cleishm/epaper-image"
+repository: "https://github.com/cleishm/epaper-image.git"
+license: "MIT"
+files:
+  exclude:
+    - "tools/**/*"
+    - "tests/**/*"
+    - ".github/**/*"
+    - "build*/**/*"
+    - ".claude/**/*"
+    - ".pytest_cache/**/*"
+    - "**/.DS_Store"

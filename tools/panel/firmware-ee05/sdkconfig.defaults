@@ -1,0 +1,21 @@
+# Modelled on idfxx_epaper_uc8179/examples/ee05_demo/sdkconfig.defaults.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+CONFIG_COMPILER_CXX_RTTI=y
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# No PSRAM: both framebuffers (48 KB mono + 96 KB grey4) fit internal RAM.
+
+# The protocol, panel driver and exception unwinding run on the main task.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Panel viewer: the XIAO's native USB-Serial-JTAG CDC port carries both the
+# console and the frame protocol. It is the primary console with no
+# secondary, so nothing claims UART0, whose default pins (GPIO 43/44) the
+# EE05 uses for display power enable and CS, and every byte of app output
+# goes through the driver's TX ring (epi::usj_transport routes stdio there),
+# never straight into the FIFO mid-line. Logging is kept quiet (WARN and
+# above only).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y

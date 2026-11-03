@@ -1,0 +1,23 @@
+# Test app for the epaper-image Unity suite (see README.md).
+
+# The suite runs in app_main: a large stack, no task watchdog (tests hog the
+# CPU for minutes, more under emulation).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
+CONFIG_ESP_TASK_WDT_EN=n
+CONFIG_ESP_INT_WDT=n
+
+# Unity: 64-bit assertions are used; tests are run by our own list, not the
+# IDF TEST_CASE registry.
+CONFIG_UNITY_ENABLE_64BIT=y
+CONFIG_UNITY_ENABLE_IDF_TEST_RUNNER=n
+
+# Full printf (fingerprints print with %llx / PRIx64, oracles with %a). Newlib
+# explicitly: ESP-IDF v6 defaults to picolibc, where the option below does not
+# exist and is silently dropped.
+CONFIG_LIBC_NEWLIB=y
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=n
+
+# -O2: faster emulated runs, and a check against differently optimised hosts.
+# Assertions stay on (as in the host build), so the drain-violation death
+# test is ignored (no fork) rather than run in its NDEBUG form.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
