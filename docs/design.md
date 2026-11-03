@@ -32,11 +32,11 @@ label S1 to S7:
 
 | stage | what it does | consumes | produces |
 |---|---|---|---|
-| S1 source | sRGB8 to linear light, CIE Y and L\*src; adaptation degree; panel XYZ and ink-relative CIELAB | one pixel | L\*src, panel Lab |
+| S1 source | sRGB8 to linear light, CIE Y and L\*src; adaptation degree; panel XYZ and ink-relative CIELAB | one pixel | L\*src, ink-relative CIELAB |
 | S2 base | separable Gaussian blur of L\*src | L\*src in a (2r+1)×(2r+1) window | base L\* |
 | S3 tone and detail | tone curve on the base, local detail added back | L\*src, base | new L\* |
-| S4 colour | vibrance on a\*b\*, veil on L\* | Lab | Lab |
-| S5 gamut | hull test in XYZ; out-of-hull pixels moved onto the hull | Lab | XYZ inside the ink hull |
+| S4 colour | vibrance on a\*b\*, veil on L\* | CIELAB | CIELAB |
+| S5 gamut | hull test in XYZ; out-of-hull pixels moved onto the hull | CIELAB | XYZ inside the ink hull |
 | S6 target | XYZ to linear sRGB | XYZ | target t |
 | S7 error diffusion | nearest ink, damped serpentine Floyd–Steinberg | t and the diffused error | ink index |
 
@@ -82,6 +82,10 @@ order, are:
 
 Code 4 is unused on that glass. The order is significant: it is the index
 space the ditherer works in, and matching ties go to the lowest index.
+
+This model of the panel has known limits: on the EL133UF1 an isolated dot gives
+less light than its share of the area predicts, and the colour inks' chroma is
+likely under-measured. Preview colours are therefore estimates.
 
 Measured colours become linear light through the sRGB EOTF and XYZ through
 the 4-decimal IEC 61966-2-1 matrix:
@@ -139,7 +143,7 @@ matrix, so the white ink maps to (1, 0, 0):
 OK(x) = M2 · cbrt(M1 · (x ⊘ w))
 ```
 
-with Ottosson's M1 (linear sRGB to LMS) and M2 (LMS′ to Lab), and a signed
+with Ottosson's M1 (linear sRGB to LMS) and M2 (LMS′ to OKLab), and a signed
 cube root so working values outside [0, 1] are defined. The tables fold the
 division into the first matrix: `lin_to_lms` = M1·diag(1/w),
 `lms_to_oklab` = M2.
@@ -365,7 +369,7 @@ in S5.
 ### S4: vibrance and veil
 
 **Vibrance** is a chroma gain that spares near-neutrals and skin. In
-ink-relative LCh:
+ink-relative CIELAB, with chroma C and hue h:
 
 ```
 C    = hypot(a*, b*)
@@ -381,6 +385,10 @@ up to 30, fading out by 45, so skin tones keep their chroma while
 saturated oranges are still boosted. The stage is skipped when `vibrance`
 is 1 (in Q16).
 
+A uniform saturation gain amplifies the slight warm cast of a near-white sky
+into yellow dots and reddens skin, so the gain fades near neutrals and spares
+skin hues. Skin tones fall at ink-relative CIELAB hues of about 22° to 56°.
+
 **Veil** lowers the highlights:
 
 ```
@@ -391,9 +399,15 @@ so source white lands `veil` L\* below paper white and is rendered as a
 light dither rather than bare paper, while L\* below 90 is untouched. It is
 skipped when `veil` is 0.
 
+A clipped sky renders as bare paper beside sparse dots in the colour just below
+the clip, so the clip's contour shows. A `veil` of about 1 hides the contour
+under a light dot field, but the same dots read as spots on intentionally white
+areas such as a page background. Every preset therefore leaves `veil` at 0, and
+it is an option for images with clipped highlights.
+
 ### S5: gamut mapping
 
-The Lab colour is converted back to XYZ with W as reference white, and
+The CIELAB colour is converted back to XYZ with W as reference white, and
 tested against every hull face:
 
 ```
@@ -430,15 +444,19 @@ towards the cusp's lightness, so far out-of-gamut, saturated colours give up
 lightness to keep chroma. α sets how quickly that happens. Scaling a\* and
 b\* by s moves along the line at constant hue without any trigonometry.
 
+α is 0.05, close to lightness-preserving, because higher values grey or darken
+pale out-of-hull colours, such as near-white backgrounds and skies, for a small
+gain in yellow chroma.
+
 The move bisects s in Q16 for 16 steps, keeping the inside end: P(1) is
 outside, P(0) = (L0, 0, 0) is a point of the hull's neutral interval, and the
 result is the last inside point found (P(0) if none). The hull is convex in
-XYZ but not in Lab, so the bisection finds a boundary crossing of the line
+XYZ but not in CIELAB, so the bisection finds a boundary crossing of the line
 rather than a guaranteed outermost one; the kept point is always inside.
 Each probe is a
-Lab-to-XYZ conversion and a hull test. Two shortcuts leave the result
-unchanged: a probe whose Q8 Lab equals that of a bracket end reuses that
-end's verdict, and the face that rejected the previous probe is tested
+CIELAB-to-XYZ conversion and a hull test. Two shortcuts leave the result
+unchanged: a probe whose Q8 CIELAB value equals that of a bracket end reuses
+that end's verdict, and the face that rejected the previous probe is tested
 first.
 
 The cusp table holds, for each integer hue, the L\* of the maximum in-hull
@@ -472,6 +490,13 @@ which lifts shadows; Deep keeps midtones at their source lightness and
 compresses the shadows; Default is halfway. Grey panels offer Default, Soft
 and Deep with the same values (adapt and vibrance have no effect on grey).
 
+Tone has the largest effect of any knob. Tone 1 loses detail in dark images, and
+`detail` cannot recover it, because the blur restores texture finer than σ, not
+the separation of large dark areas; so Default sits at tone 0.5. Detail masks
+grain, but detail 1 over-processes skin at tone 1, so the presets use 0.75. Tone
+is not derived from the image because a streaming converter has no whole-image
+pass.
+
 ## Error diffusion
 
 S7 (`src/epi_dither.c`) turns each row of targets into ink indices by error
@@ -480,6 +505,12 @@ diffused onto it, and the remaining error is spread onto unprocessed
 neighbours. Matching is done in ink-relative OKLab, where distance follows
 perceived difference; the error is kept in linear sRGB, where the eye
 averages the inks' light.
+
+On Spectra 6 inks, linear-RGB matching builds a mid grey from white and the
+colour inks with no black, CIELAB matching is grainier than OKLab, and
+serpentine scanning cuts the worst grain. Restricting the search to MBVQ gives
+no grain gain over OKLab with serpentine, and jitter or Ostromoukhov and
+Zhou–Fang coefficients add grain.
 
 ### Per pixel
 
@@ -521,6 +552,17 @@ cannot pay off nearby decays instead of travelling far and smearing into
 neighbouring regions. The coefficients come from the target t, not the
 working value, so they are a property of the image, not of the dither
 pattern.
+
+Damping chroma on near-neutral targets pulls greys towards the ink that
+dominates the mix, green on the EL133UF1, and damping luminance alone leaves
+dark colours grainy. Damping luminance up to white leaves a hard edge where the
+dots stop. At a 10% loss, separate saturated reds collapse onto one ink.
+
+Most of damping's smoothness comes from dots it stops placing: the loss caps the
+accumulated error, so a colour close to an ink may never receive the minority
+ink, leaving a dead zone. Grain falls far more where dots are lost than where
+they are kept, so keeping those dots gives up the smoothness, and dead zones are
+the cost.
 
 ### Floyd–Steinberg, serpentine
 
@@ -649,6 +691,13 @@ a continuous slope and monotone. Coverage below 3% snaps to the level;
 coverage from 11% to 89% is unchanged. Targets outside [y_0, y_last) are
 unchanged. The gap is found by binary search on `level_y`; s is rounded to
 Q16 and h is formed exactly in int64 and rounded once.
+
+These values trade sparse dots against shadow tone: with no toe, dark areas are
+grainy with isolated dots, and a toe twice as wide darkens them noticeably.
+Where a gap is narrow in lightness, as at the top of the GDEY075T7's 4-grey
+mode, the toe spans little L\* and barely changes near-white grain. Zhou–Fang
+coefficients and threshold modulation do not improve on the toe, and need extra
+tables and a hash.
 
 Rounding c (not flooring it) makes t′ = t exactly wherever c′ = c, so init
 stores each gap's identity band (c in [c0, 1 − c0], 78% of the gap) as two
@@ -805,8 +854,8 @@ in [1, dst_width]) and likewise dst_h, centred at
 
 The output is a pure function of the input rows and the configuration, and
 it is byte-identical on every supported target: host (x86-64 and ARM),
-ESP32 (Xtensa and RISC-V) and WASM. A preview computed in a browser is
-therefore exactly what the device will show. This rests on three rules: the
+ESP32 (Xtensa and RISC-V) and WASM. A preview computed in a browser therefore
+uses exactly the ink codes the device will get. This rests on three rules: the
 per-pixel code is integer-only, the init-time floating point uses only
 correctly rounded IEEE operations, and nothing depends on
 implementation-defined behaviour.
@@ -820,8 +869,8 @@ away from zero (`epi_round_shift`, or a rounded division by a constant).
 |---|---|
 | linear light, XYZ, matrices | Q16 in int32; products Q32 in int64 |
 | L\*, a\*, b\* | Q8 in int32 (int16 for L\*src, base and blur rows) |
-| Lab ratio X/Xn | Q25 forward, Q24 inverse |
-| Lab f(t) | Q19 forward, Q24 inverse |
+| CIELAB ratio X/Xn | Q25 forward, Q24 inverse |
+| CIELAB f(t) | Q19 forward, Q24 inverse |
 | D, gains, smoothstep results | Q16 |
 | tone table T / gain table g | Q8 / Q16, 401 knots at 1/4 L\* |
 | cusp move L\*, C\*, anchor | Q16 L\* units; s in Q16 |
@@ -844,12 +893,12 @@ magnitude, so no result depends on how a compiler shifts negative numbers.
 Products are formed in int64 and narrowed once. The nonlinear functions are
 integer primitives (`src/epi_math.c`):
 
-- **Cube root** (Lab f, OKLab), Q16 in and out, signed. The input is
+- **Cube root** (CIELAB f, OKLab), Q16 in and out, signed. The input is
   normalised to 2^(3q)·u with u in [1, 8), so cbrt = 2^q·cbrt(u), and
   cbrt(u) is linearly interpolated in a 385-knot Q30 table (128 intervals
   per octave of u) and rounded once. Error is at most max(1 LSB, 2^-16
   relative); the function is odd and monotone by construction.
-- **Cube** (Lab f⁻¹): multiplications.
+- **Cube** (CIELAB f⁻¹): multiplications.
 - **Square root** (hypot, the cusp anchor): exact digit-by-digit integer
   square root, rounded to nearest where needed.
 - **atan2** (hue, for vibrance and the cusp move): octant reduction, a Q16
@@ -859,7 +908,7 @@ integer primitives (`src/epi_math.c`):
   1 outside the ramp.
 
 Divisions are by init-time reciprocals (the white ink ratios) or by
-constants (the Lab inverse, which uses exact rational constants such as
+constants (the CIELAB inverse, which uses exact rational constants such as
 (L + 16)/116 = (L·2^8 + 4096)·2^14/29 in Q24).
 
 ### Init-time floating point
@@ -873,7 +922,7 @@ only + − × ÷, integer arithmetic and exact bit manipulation, which IEEE 754
 rounds identically on every conforming target. The transcendental
 functions it needs are the library's own, never libm's:
 
-- `epi_cbrt_d`, for +0 and 2^-16 ≤ x < 2 (level Y and the Lab ratio): exact
+- `epi_cbrt_d`, for +0 and 2^-16 ≤ x < 2 (level Y and the CIELAB ratio): exact
   exponent decomposition, six Newton steps and one correction step whose
   residual is computed exactly (Dekker two-product), correctly rounded except
   possibly in near-halfway cases;
@@ -928,7 +977,7 @@ intentional change to the output: the failing test prints the new values.
 writes them as C. It writes `src/epi_srgb.c` (the panel-independent Q16
 EOTF table and sRGB matrix), one `src/panels/<panel>.c` per colour panel, and
 on request a grey glass's calibrations. The real-valued colour maths is in
-`colour.py` (sRGB, XYZ, Lab, Bradford), `palette.py` (the ink tables),
+`colour.py` (sRGB, XYZ, CIELAB, Bradford), `palette.py` (the ink tables),
 `gamut.py` (the ink hull, adaptation and black-point compensation) and
 `model.py` (OKLab, the cusp table, partial adaptation); `gen.py` and
 `grey.py` fold matrices, quantise and render C.
@@ -980,7 +1029,7 @@ neutral interval, a margin derived in `gen.py` from the cusp move's arithmetic
 ([S5](#s5-gamut-mapping)). The last two fail generation with a message, since
 they depend on the inks rather than on panelgen's own correctness.
 
-### Inputs SHA-256 and --check
+### Inputs SHA-256 and the check mode
 
 Each generated file starts with the command that produced it and an
 **Inputs SHA-256**: the SHA-256 of a canonical JSON (sorted keys, compact)
@@ -1100,6 +1149,10 @@ rejects a source with a side over 65535 or an area over `max_src_pixels`
 is 0 then. A long, thin source at the limit still needs a large workspace, so a
 caller handling untrusted images also checks the size against its memory
 budget.
+
+The library does not automatically pick a cheaper filter or pre-shrink for
+untrusted images, because that would silently change output and add a second
+path.
 
 ### Output formats
 

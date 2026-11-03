@@ -300,8 +300,9 @@ with these differences:
   frame start from the same state, whatever was shown before. It does not
   remove ghosting from content held on the panel for a long time (see the
   driver's README), so do grey calibration shots on a panel that has not held
-  one image for long. `@epi done <ms> total <ms>` gives the frame's own refresh,
-  and wake to sleep.
+  one image for long. A mono frame after a grey frame shows no visible ghost, so
+  the firmware scrubs before grey frames only. `@epi done <ms> total <ms>` gives
+  the frame's own refresh, and wake to sleep.
 
 ### Waveforms
 
