@@ -188,3 +188,25 @@ jobs:
       - name: panel tests
         working-directory: tools/panel
         run: python -m pytest -q tests
+
+  # The one check the main branch ruleset requires, so jobs can change without
+  # editing the ruleset.
+  all-checks:
+    if: always()
+    needs: [format, build, sanitizers, emscripten, panelgen, panel]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that every required job succeeded
+        env:
+          # always() means this job runs even when a dependency fails, so the
+          # results have to be inspected rather than inferred from getting here.
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a required job did not succeed"
+              exit 1
+            fi
+          done
+          echo "all required jobs succeeded"
