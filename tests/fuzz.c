@@ -1,5 +1,5 @@
 /*
- * Randomized API harness for the sanitizer CI job.
+ * Randomised API harness for the sanitizer CI job.
  *
  * Drives the resampler and the converter with random, deliberately hostile
  * configurations (degenerate and edge-hugging source rectangles, extreme

@@ -46,13 +46,13 @@ def ref_mono(ink) -> bytes:
     return bytes(data)
 
 
-def ref_gray4(gray) -> bytes:
+def ref_grey4(grey) -> bytes:
     stride = (W + 7) // 8
     size = stride * H
     data = bytearray(2 * size)
     for y in range(H):
         for x in range(W):
-            g = gray[y][x]
+            g = grey[y][x]
             mask = 1 << (7 - x % 8)
             if g & 1:
                 data[y * stride + x // 8] |= mask
@@ -86,7 +86,7 @@ def test_grey4_plane_bit_layout():
 def test_grey4_payload_matches_idfxx_reference():
     lv = random_levels("grey4", seed=3)
     got = send.Target("ee05", "grey4").to_wire(convert_frame(lv, "grey4"))
-    assert got == ref_gray4([[3 - v for v in row] for row in lv])
+    assert got == ref_grey4([[3 - v for v in row] for row in lv])
 
 
 @pytest.mark.parametrize("mode,size", [("mono", 48000), ("grey4", 96000)])

@@ -138,12 +138,12 @@ static double epi_axis_bounds(const epi_axis_t* a, uint32_t i, uint32_t* lo, uin
         *n = 1;
         return 0.0;
     }
-    double center = a->in0 + ((double)i + 0.5) * a->scale; /* unfused */
-    int32_t xmin = (int32_t)(center - a->support + 0.5);
+    double centre = a->in0 + ((double)i + 0.5) * a->scale; /* unfused */
+    int32_t xmin = (int32_t)(centre - a->support + 0.5);
     if (xmin < 0) {
         xmin = 0;
     }
-    int32_t xmax = (int32_t)(center + a->support + 0.5);
+    int32_t xmax = (int32_t)(centre + a->support + 0.5);
     if (xmax > (int32_t)a->in_size) {
         xmax = (int32_t)a->in_size;
     }
@@ -155,7 +155,7 @@ static double epi_axis_bounds(const epi_axis_t* a, uint32_t i, uint32_t* lo, uin
     if (*n > a->max_n) {
         *n = a->max_n;
     }
-    return center;
+    return centre;
 }
 
 /* A normalised weight to fixed point, rounding half away from zero. */
@@ -179,10 +179,10 @@ static void epi_axis_coeffs(
     uint32_t* n_out
 ) {
     uint32_t lo, n;
-    double center = epi_axis_bounds(a, i, &lo, &n);
+    double centre = epi_axis_bounds(a, i, &lo, &n);
     double ww = 0.0;
     for (uint32_t t = 0; t < n; t++) {
-        w[t] = f(((double)(int32_t)(t + lo) - center + 0.5) * a->inv_fs);
+        w[t] = f(((double)(int32_t)(t + lo) - centre + 0.5) * a->inv_fs);
         ww += w[t];
     }
     for (uint32_t t = 0; t < n; t++) {

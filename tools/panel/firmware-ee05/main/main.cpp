@@ -114,7 +114,7 @@ long long show(bool grey) {
     // only the new-image plane in mono mode) drives every pixel with the
     // deep black-to-white erase waveform rather than white-to-white. The
     // grey midtones are open-loop drives, so this makes each grey frame's
-    // starting point repeatable (it does not remove polarization from
+    // starting point repeatable (it does not remove polarisation from
     // long-held content; see the idfxx_epaper_uc8179 README). The mono
     // framebuffer is free scratch here: it holds no frame.
     g_mono->fill(true);
