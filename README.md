@@ -12,7 +12,8 @@ using the colours measured on the panel.
   workspaces, and you can ask for their sizes up front.
 - **Deterministic.** Each pixel is processed with integer maths only, so the
   output is byte-for-byte the same on a host, on ESP32 and in WASM. A preview
-  on your computer is exactly what the panel will show.
+  on your computer uses exactly the ink codes the panel will get. Its colours
+  are estimates from the panel's measured inks.
 - **Rendering for measured inks.** Colours are adjusted for the paper's white
   and mapped to what the panel's inks can show. A small `epi_intent_t` controls
   tone, local detail and vibrance, and each panel has named presets.
@@ -232,7 +233,7 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
 
 ## Tools
 
-- **`tools/convert`** is a command-line converter.
+- `tools/convert` is a command-line converter.
   `convert [options] INPUT OUTPUT` reads an image (PNG, JPEG, BMP and others,
   using [stb_image](https://github.com/nothings/stb), downloaded when
   configuring), applies a JPEG's EXIF orientation, and writes the packed frame
@@ -245,11 +246,11 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
   Run `convert --help` for the full list. It is built when
   `EPAPER_IMAGE_BUILD_TOOLS` is on. It is a development tool and shouldn't be
   given untrusted files.
-- **`tools/panel`** shows converted frames on a real panel during development.
+- `tools/panel` shows converted frames on a real panel during development.
   It has ESP-IDF firmware that receives a frame over USB serial, and `send.py`,
   which sends it. See [tools/panel/README.md](tools/panel/README.md) for the
   supported boards.
-- **`tools/panelgen`** generates the tables for colour panels and for grey
+- `tools/panelgen` generates the tables for colour panels and for grey
   panels shipped as const calibrations. See
   [tools/panelgen/README.md](tools/panelgen/README.md).
 

@@ -1,5 +1,9 @@
 # Adding a panel
 
+The library models a panel as inks mixed by area, so other ink-palette panels
+work as data. Kaleido and other colour-filter panels need a different output
+model and aren't supported.
+
 To support a new panel, you measure the colours it really shows and give them
 to the library as a calibration. How you do that depends on the panel:
 
@@ -15,9 +19,9 @@ Every route starts with the same measurements.
 
 For each ink or grey level you need three values, which make up an `epi_ink_t`:
 
-- **`code`:** the value sent to the panel.
-- **`nominal`:** the ink's ideal sRGB8 colour, used only for nominal previews.
-- **`measured`:** the sRGB8 colour the panel really shows. Matching, dithering
+- `code`: the value sent to the panel.
+- `nominal`: the ink's ideal sRGB8 colour, used only for nominal previews.
+- `measured`: the sRGB8 colour the panel really shows. Matching, dithering
   and measured previews all use this value, so the quality of the calibration
   depends on it.
 
