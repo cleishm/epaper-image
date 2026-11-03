@@ -23,7 +23,7 @@ extern "C" {
 /** @brief Library minor version. */
 #define EPI_VERSION_MINOR 1
 /** @brief Library patch version. */
-#define EPI_VERSION_PATCH 0
+#define EPI_VERSION_PATCH 1
 
 /**
  * @brief Error codes returned by library functions.
@@ -101,7 +101,7 @@ typedef struct epi_panel_tables epi_panel_tables_t;
 /**
  * @brief A panel calibration: what the panel shows, and how to render for it.
  */
-typedef struct {
+typedef struct epi_panel {
     /** Glass name, e.g. "EL133UF1". */
     const char* name;
     /** Native size in pixels. */
