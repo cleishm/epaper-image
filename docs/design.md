@@ -508,9 +508,8 @@ averages the inks' light.
 
 On Spectra 6 inks, linear-RGB matching builds a mid grey from white and the
 colour inks with no black, CIELAB matching is grainier than OKLab, and
-serpentine scanning cuts the worst grain. Restricting the search to MBVQ gives
-no grain gain over OKLab with serpentine, and jitter or Ostromoukhov and
-Zhou–Fang coefficients add grain.
+serpentine scanning cuts the worst grain. Jitter or Ostromoukhov and Zhou–Fang
+coefficients add grain.
 
 ### Per pixel
 

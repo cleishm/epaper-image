@@ -132,7 +132,7 @@ The config is rejected unless:
 
 This generates the same tables as `epi_grey_panel_init`, as constants in the
 library. Set up panelgen's Python environment first, as described in
-[tools/panelgen/README.md](../tools/panelgen/README.md). The commands below run
+[tools/panelgen/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panelgen/README.md). The commands below run
 from `tools/panelgen`, using its `.venv/bin/python`.
 
 1. **Add the measurements.** Commit a JSON file as
@@ -171,7 +171,7 @@ regenerate.
 
 Colour panels have to be generated, because the library has no way to build them
 at runtime. Set up panelgen's Python environment first, as described in
-[tools/panelgen/README.md](../tools/panelgen/README.md). The commands below run
+[tools/panelgen/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panelgen/README.md). The commands below run
 from `tools/panelgen`, using its `.venv/bin/python`.
 
 1. **Add the inks.** In `panelgen/palette.py`, add each ink's nominal and
@@ -215,7 +215,7 @@ panel:
    the levels were measured with.
 3. Add it to the `PANELS` table in `tools/convert/convert.c`, with the packed
    format the panel is sent.
-4. Add it to the table in the root `README.md`.
+4. Add it to the table in the project README.
 
 ## Check the result
 
@@ -237,7 +237,7 @@ panel:
    ```
 
 3. For ESP32 targets, run the QEMU tests as described in
-   [tests/esp_idf/README.md](../tests/esp_idf/README.md).
+   [tests/esp_idf/README.md](https://github.com/cleishm/epaper-image/blob/main/tests/esp_idf/README.md).
 4. Convert a few photos with `tools/convert` and show them on the panel. For a
    panel that `tools/panel` doesn't support, send the frame with your own
    firmware.
