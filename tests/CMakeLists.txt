@@ -59,7 +59,26 @@ add_executable(epaper_image_cxx_header_test cxx_header_test.cpp)
 target_link_libraries(epaper_image_cxx_header_test PRIVATE epaper_image::epaper_image)
 add_test(NAME cxx_header COMMAND epaper_image_cxx_header_test)
 
-set(epi_test_targets epaper_image_tests epaper_image_cxx_header_test)
+# epi_panel_t must stay forward-declarable, from both C and C++.
+add_executable(epaper_image_panel_forward_decl_test_c panel_forward_decl_test.c)
+target_link_libraries(epaper_image_panel_forward_decl_test_c PRIVATE epaper_image::epaper_image)
+set_target_properties(epaper_image_panel_forward_decl_test_c PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF
+)
+add_test(NAME panel_forward_decl_c COMMAND epaper_image_panel_forward_decl_test_c)
+
+add_executable(epaper_image_panel_forward_decl_test_cxx panel_forward_decl_test.cpp)
+target_link_libraries(epaper_image_panel_forward_decl_test_cxx PRIVATE epaper_image::epaper_image)
+add_test(NAME panel_forward_decl_cxx COMMAND epaper_image_panel_forward_decl_test_cxx)
+
+set(epi_test_targets
+    epaper_image_tests
+    epaper_image_cxx_header_test
+    epaper_image_panel_forward_decl_test_c
+    epaper_image_panel_forward_decl_test_cxx
+)
 
 # The randomised API harness (see tests/fuzz.c); run it with sanitizers.
 if(EPAPER_IMAGE_BUILD_FUZZ)

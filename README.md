@@ -83,7 +83,7 @@ include(FetchContent)
 FetchContent_Declare(
     epaper_image
     GIT_REPOSITORY https://github.com/cleishm/epaper-image.git
-    GIT_TAG v0.1.0
+    GIT_TAG v0.1.1
 )
 FetchContent_MakeAvailable(epaper_image)
 
