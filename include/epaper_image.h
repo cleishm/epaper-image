@@ -276,8 +276,8 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  * Nothing is allocated. Init uses only deterministic arithmetic and no libm, so
  * the same config gives the same panel on every target.
  *
- * Deriving the cusp table costs about a million in-gamut tests in double. On a target
- * without a double-precision FPU init therefore blocks for many seconds (about 15 s
+ * Deriving the cusp table costs about 400,000 in-gamut tests in double. On a target
+ * without a double-precision FPU init therefore blocks for seconds (about 6 s
  * on a 240 MHz ESP32-S3), without yielding unless @c cfg->progress does. Firmware for such a target should call it
  * once at startup and have @c progress yield or feed the task watchdog, or
  * generate a const panel with tools/panelgen. Inks that are rejected are usually

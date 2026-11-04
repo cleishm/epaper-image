@@ -804,9 +804,14 @@ is q(x, n) = sign(x)·⌊|x|·2^n + 0.5⌋ throughout.
   containment tolerance of 1e-7 in XYZ. The search samples 64 L\* values over the
   neutral interval, then runs 4 refinement passes of 17 samples spanning the best
   sample's neighbours, each narrowing the step by a factor of 8 (from about 1 L\*
-  to about 2.5·10^-4). That is 950,400 in-gamut tests in double, the slow part, above
-  all on a target with no double-precision FPU, so the inner loop tests the face
-  that rejected the last point first, as S5 does, and evaluates Y once per L\*.
+  to about 2.5·10^-4). The hull is convex in XYZ but not in CIELAB, so near a cusp a
+  ray can leave the hull and come back, and the result is wherever the midpoints
+  lead. A bisection therefore tests every midpoint, and gives up only once its upper
+  end falls to the value it has to beat: that of a sample already known, the previous
+  pass's best or the sample that won the previous hue's first pass. In-gamut tests
+  in double are the slow part, about 400,000 for most inks, above all on a target
+  with no double-precision FPU, so the inner loop also tests the face that rejected
+  the last point first, as S5 does, and evaluates Y once per L\*.
 - **Kernel.** The Q15 Gaussian of [S2](#s2-base) for the panel's σ, from
   `epi_gaussian_kernel_q15`, shared with grey panels.
 

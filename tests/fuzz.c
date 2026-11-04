@@ -21,7 +21,7 @@
  *
  * iterations (default 3000) is the resampler count; the source-limit check
  * runs as many, and the converter, the reducer and the packer a third as many
- * each. An accepted colour panel costs a million in-gamut tests, so the colour count
+ * each. An accepted colour panel costs about 400,000 in-gamut tests, so the colour count
  * is its own, by default a hundredth of iterations. The default seed is fixed,
  * so a run is reproducible; a seed, if given, is mixed into it. Built with
  * -DEPAPER_IMAGE_BUILD_FUZZ=ON;

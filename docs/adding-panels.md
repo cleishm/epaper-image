@@ -220,9 +220,9 @@ Use the result like a built-in panel, in `epi_config_t.panel`. Its storage must
 outlive the panel and every converter using it. It includes Default, Soft, Deep and
 Vivid presets.
 
-Init runs about a million in-gamut tests in double, each asking whether a colour
+Init runs about 400,000 in-gamut tests in double, each asking whether a colour
 lies inside the convex hull of the inks. On a chip without a double-precision FPU,
-that blocks for many seconds (about 15 s on a 240 MHz ESP32-S3), so call it once at
+that blocks for seconds (about 6 s on a 240 MHz ESP32-S3), so call it once at
 startup, or generate a built-in panel instead.
 
 For a target where the block matters, set `progress` in the config. Init calls it

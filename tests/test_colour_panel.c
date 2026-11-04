@@ -2,7 +2,7 @@
  * Tests for colour panels built at runtime (docs/design.md, "Colour panels from
  * inks"; src/epi_colour_panel.c).
  *
- * A successful init costs about a million in-gamut tests and this file also runs
+ * A successful init costs about 400,000 in-gamut tests and this file also runs
  * under QEMU, so the few panels it builds are built once and shared. The ink sets
  * other than EL133UF1's are plausible measured inks, not calibrations.
  */
