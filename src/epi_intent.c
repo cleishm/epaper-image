@@ -5,8 +5,8 @@
  * from zero, via epi_round_shift or div_round_i32):
  *   linear light, XYZ           Q16 (products with Q16 matrices are Q32, int64)
  *   L*, a*, b*                  Q8, int32 (int16 only for L*src, base, blur rows)
- *   Lab ratio t = X/Xw          Q25 (forward) / Q24 (inverse)
- *   Lab f(t)                    Q19 (forward) / Q24 (inverse)
+ *   CIELAB ratio t = X/Xw       Q25 (forward) / Q24 (inverse)
+ *   CIELAB f(t)                 Q19 (forward) / Q24 (inverse)
  *   D, gains, smoothsteps       Q16
  *   cusp-move L*, C* and anchor Q16 L* units
  *
@@ -16,7 +16,7 @@
  *
  * Grey panels (design.md "Grey panels") share S1 (lstar_src), S2 and S3 (tone_detail, with
  * the tone table built by the same code from T0 with W_y = 1 and
- * B_y = level_y[0]), the veil, and the Lab f⁻¹ of S5; there is no
+ * B_y = level_y[0]), the veil, and the CIELAB f⁻¹ of S5; there is no
  * adaptation, vibrance or hull.
  */
 #include "epi_intent.h"
@@ -117,7 +117,7 @@ static inline int32_t adapt_degree(const epi_intent_ctx_t* ctx, int32_t lsrc_q8)
     return ctx->adapt_q16 + epi_mul_q16(EPI_Q16_ONE - ctx->adapt_q16, ss);
 }
 
-/* Panel Lab Q8: panel = M_bpc·lin + D·(M_adapt·lin − M_bpc·lin) + B,
+/* Panel CIELAB Q8: panel = M_bpc·lin + D·(M_adapt·lin − M_bpc·lin) + B,
  * in Q32 (panelgen makes M_adapt's rows sum to W − B, so source white lands
  * exactly on the white ink); ratio to the white ink by the init-time
  * reciprocal (no division). */
@@ -182,7 +182,7 @@ static inline int32_t veil_lstar(const epi_intent_ctx_t* ctx, int32_t l_q8) {
 
 /* ---- S5 ----------------------------------------------------------------- */
 
-/* Lab Q8 → XYZ Q16 (reference white = the white ink). The f values are
+/* CIELAB Q8 → XYZ Q16 (reference white = the white ink). The f values are
  * exact-rational divisions by constants in 32 bits:
  *   fy = (L + 16)/116                               (Q24, lab_fy_q24)
  *   a/500             = a_q8·2^14 / 125
@@ -239,7 +239,7 @@ static inline int lab_eq(const int32_t p[3], const int32_t q[3]) {
     return p[0] == q[0] && p[1] == q[1] && p[2] == q[2];
 }
 
-/* Cusp move of an out-of-hull Lab (Q8) to xyz (Q16). */
+/* Cusp move of an out-of-hull CIELAB (Q8) to xyz (Q16). */
 static void cusp_move(const epi_colour_tables_t* t, const int32_t lab[3], int32_t xyz[3], unsigned* hint) {
     const int64_t lmin = (int64_t)t->lstar_min << 8, lmax = (int64_t)t->lstar_max << 8;
     const int64_t span = lmax - lmin;
@@ -281,7 +281,7 @@ static void cusp_move(const epi_colour_tables_t* t, const int32_t lab[3], int32_
 
     /* Bisect s on [0, 1] in Q16, keeping the inside end. P(mid) is
      * evaluated (lab_to_xyz + in-gamut test) only when it differs from the
-     * Lab point of both ends: an end with the same P has the same xyz and
+     * CIELAB point of both ends: an end with the same P has the same xyz and
      * so the same inside result. hi starts at s = 1, P(1) = (lq, a, b),
      * outside (above); lo's P is known once an inside point was found. */
     int32_t lo = 0, hi_s = EPI_Q16_ONE;

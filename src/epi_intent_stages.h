@@ -10,7 +10,7 @@
 typedef struct {
     int32_t lsrc;          /* S1: L*src */
     int32_t d;             /* S1: adaptation degree D */
-    int32_t lab_panel[3];  /* S1: ink-relative Lab of the panel colour */
+    int32_t lab_panel[3];  /* S1: ink-relative CIELAB of the panel colour */
     int32_t lab_tone[3];   /* S3: after tone + detail */
     int32_t lab_colour[3]; /* S4: after vibrance and veil */
     int32_t xyz[3];        /* S5: after the cusp move */
