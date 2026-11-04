@@ -84,7 +84,8 @@ static const mat3_t OK_M2 = {{
 #define CUSP_REFINE 17
 #define CUSP_REFINE_PASSES 4
 #define CUSP_BISECT_ITERS 20
-#define CUSP_C_PROBE 200.0 /* chroma of the probe; checked to be outside */
+#define CUSP_C_LSB (1.0 / (1 << CUSP_BISECT_ITERS)) /* of the probe's chroma */
+#define CUSP_C_PROBE 200.0                          /* chroma of the probe; checked to be outside */
 
 /* The hull in double, before quantisation: inside iff n·x + d ≤ 0 on every face. */
 typedef struct {
@@ -359,8 +360,14 @@ static inline bool hull_contains(const hull_t* h, double x, double y, double z, 
  * bisects a probe at constant L* and hue, keeping the inside end; negative if the
  * probe itself isn't outside the hull. fx = fy + s·dfx, fz = fy − s·dfz, where
  * dfx = C·cos(h)/500 and dfz = C·sin(h)/200 for the probe's C.
+ *
+ * The result stays below hi, so the search gives up with 0 once hi falls to
+ * at_least, the smallest limit the caller can use. Testing at_least directly would
+ * skip midpoints and could change the result: near a cusp a ray can leave the hull
+ * and come back, and the result is wherever these midpoints lead.
  */
-static double max_chroma(const hull_t* h, const double w[3], double lstar, double dfx, double dfz, unsigned* hint) {
+static double
+max_chroma(const hull_t* h, const double w[3], double lstar, double dfx, double dfz, double at_least, unsigned* hint) {
     const double fy = (lstar + 16.0) / 116.0;
     const double y = w[1] * epi_lab_finv_d(fy);
     double lo = 0.0, hi = 1.0;
@@ -372,17 +379,27 @@ static double max_chroma(const hull_t* h, const double w[3], double lstar, doubl
             lo = mid;
         } else {
             hi = mid;
+            if (hi <= at_least) {
+                return 0.0;
+            }
         }
     }
     return hi == 1.0 ? -1.0 : lo;
+}
+
+/* A sample of the first pass of the cusp search. */
+static double coarse_l(double lmin, double lmax, double step, int i) {
+    return i == CUSP_L_SAMPLES - 1 ? lmax : lmin + i * step;
 }
 
 /*
  * For each integer hue, the L* of maximum in-hull chroma: 64 samples over the
  * neutral interval, then 4 refinement passes of 17 samples spanning the best
  * sample's neighbours, each narrowing the step by 8 (the ridge has a kink at the
- * cusp), the first maximum winning. That is about 950k in-gamut tests for a panel
- * that passes; a panel that fails stops at the first bad hue.
+ * cusp), the first maximum winning. A pass starts from a sample whose limit is
+ * known, so that max_chroma can give up on the others: the previous pass's best,
+ * its centre, or else the sample that won the previous hue's first pass. A panel
+ * that fails stops at the first bad hue.
  */
 static epi_err_t cusp_table(
     const hull_t* h,
@@ -394,32 +411,44 @@ static epi_err_t cusp_table(
     epi_progress_fn_t progress,
     void* progress_ctx
 ) {
+    const double coarse_step = (lmax - lmin) / (CUSP_L_SAMPLES - 1);
     unsigned hint = 0;
+    int coarse_best = -1; /* the sample that won the previous hue's first pass */
     for (int hue = 0; hue < 360; hue++) {
         const double r = hue * PI / 180.0;
         const double dfx = CUSP_C_PROBE * epi_sin_d(r + PI / 2.0) / 500.0; /* cos(r) */
         const double dfz = CUSP_C_PROBE * epi_sin_d(r) / 200.0;
-        double step = (lmax - lmin) / (CUSP_L_SAMPLES - 1);
-        double best_l = lmin;
+        double step = coarse_step;
+        double best_l = lmin, best_c = 0.0;
         for (int pass = 0; pass <= CUSP_REFINE_PASSES; pass++) {
             const double centre = best_l;
             const int samples = pass == 0 ? CUSP_L_SAMPLES : CUSP_REFINE;
-            double best_c = -1.0;
+            const int known = pass == 0 ? coarse_best : CUSP_REFINE / 2;
+            if (pass == 0 && known >= 0) {
+                best_c = max_chroma(h, w, coarse_l(lmin, lmax, coarse_step, known), dfx, dfz, 0.0, &hint);
+                if (best_c < 0.0) {
+                    return reject(why, "ink hull reaches beyond chroma 200");
+                }
+            }
+            const double known_c = best_c;
+            double at_least = best_c;
             for (int i = 0; i < samples; i++) {
                 double l;
                 if (pass == 0) {
-                    l = i == CUSP_L_SAMPLES - 1 ? lmax : lmin + i * step;
+                    l = coarse_l(lmin, lmax, coarse_step, i);
                 } else {
                     l = centre + step * (-1.0 + 2.0 * i / (CUSP_REFINE - 1));
                     l = l < lmin ? lmin : (l > lmax ? lmax : l);
                 }
-                const double c = max_chroma(h, w, l, dfx, dfz, &hint);
+                const double c = i == known ? known_c : max_chroma(h, w, l, dfx, dfz, at_least, &hint);
                 if (c < 0.0) {
                     return reject(why, "ink hull reaches beyond chroma 200");
                 }
-                if (c > best_c) {
+                if (c >= at_least) {
                     best_c = c;
                     best_l = l;
+                    at_least = c + CUSP_C_LSB;
+                    coarse_best = pass == 0 ? i : coarse_best;
                 }
             }
             if (pass > 0) {
