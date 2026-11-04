@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
@@ -129,7 +129,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v16
 
       - name: Configure
         run: emcmake cmake -B build-wasm -DEPAPER_IMAGE_BUILD_TESTS=ON -DEPAPER_IMAGE_BUILD_TOOLS=OFF -DEPAPER_IMAGE_WARNINGS_AS_ERRORS=ON -DCMAKE_BUILD_TYPE=Release
@@ -152,7 +152,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
 
