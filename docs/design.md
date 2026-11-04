@@ -40,7 +40,7 @@ label S1 to S7:
 | S2 base | separable Gaussian blur of L\*src | L\*src in a (2r+1)×(2r+1) window | base L\* |
 | S3 tone and detail | tone curve on the base, local detail added back | L\*src, base | new L\* |
 | S4 colour | vibrance on a\*b\*, veil on L\* | CIELAB | CIELAB |
-| S5 gamut | hull test in XYZ; out-of-hull pixels moved onto the hull | CIELAB | XYZ inside the ink hull |
+| S5 gamut | in-gamut test in XYZ; out-of-hull pixels moved onto the hull | CIELAB | XYZ inside the ink hull |
 | S6 target | XYZ to linear sRGB | XYZ | target t |
 | S7 error diffusion | nearest ink, damped serpentine Floyd–Steinberg | t and the diffused error | ink index |
 
@@ -457,7 +457,8 @@ result is the last inside point found (P(0) if none). The hull is convex in
 XYZ but not in CIELAB, so the bisection finds a boundary crossing of the line
 rather than a guaranteed outermost one; the kept point is always inside.
 Each probe is a
-CIELAB-to-XYZ conversion and a hull test. Two shortcuts leave the result
+CIELAB-to-XYZ conversion and an in-gamut test against the hull. Two shortcuts
+leave the result
 unchanged: a probe whose Q8 CIELAB value equals that of a bracket end reuses
 that end's verdict, and the face that rejected the previous probe is tested
 first.

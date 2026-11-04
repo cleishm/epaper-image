@@ -280,7 +280,7 @@ static void cusp_move(const epi_colour_tables_t* t, const int32_t lab[3], int32_
     l0 = l0 < lmin ? lmin : (l0 > lmax ? lmax : l0);
 
     /* Bisect s on [0, 1] in Q16, keeping the inside end. P(mid) is
-     * evaluated (lab_to_xyz + hull test) only when it differs from the
+     * evaluated (lab_to_xyz + in-gamut test) only when it differs from the
      * Lab point of both ends: an end with the same P has the same xyz and
      * so the same inside result. hi starts at s = 1, P(1) = (lq, a, b),
      * outside (above); lo's P is known once an inside point was found. */
