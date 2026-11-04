@@ -381,6 +381,35 @@ static void assert_rejected_both(const epi_ink_t* inks, size_t n, const char* re
     TEST_ASSERT_EQUAL_STRING(reason, why);
 }
 
+/* The black ink is the darkest measured; its nominal colour must be the darkest
+ * nominal too. */
+void test_colour_panel_black_is_darkest_nominal(void) {
+    /* A yellow measured dark and near neutral, just below the real black: accepted
+     * without the check, with source black rendering almost entirely in yellow. */
+    static const epi_ink_t dark_yellow[6] = {
+        INKN(0, 0, 0, 0, 59, 62, 62),
+        INKN(1, 255, 255, 255, 190, 200, 200),
+        INKN(2, 255, 255, 0, 61, 61, 48),
+        INKN(3, 255, 0, 0, 137, 50, 41),
+        INKN(5, 0, 0, 255, 60, 108, 177),
+        INKN(6, 0, 255, 0, 87, 125, 107),
+    };
+    assert_rejected_both(dark_yellow, 6, "darkest measured ink is not the black ink");
+    /* The same inks with no nominal colours skip the check, as for white. */
+    static const epi_ink_t no_nominals[6] = {
+        INKN(0, 0, 0, 0, 59, 62, 62),
+        INKN(1, 0, 0, 0, 190, 200, 200),
+        INKN(2, 0, 0, 0, 61, 61, 48),
+        INKN(3, 0, 0, 0, 137, 50, 41),
+        INKN(5, 0, 0, 0, 60, 108, 177),
+        INKN(6, 0, 0, 0, 87, 125, 107),
+    };
+    epi_colour_tables_t t;
+    const char* why = NULL;
+    memset(&t, 0, sizeof t);
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_colour_tables_derive(no_nominals, 6, &t, &why, NULL, NULL));
+}
+
 /* The white ink is the lightest measured; its nominal colour must be the lightest
  * nominal too. */
 void test_colour_panel_white_is_lightest_nominal(void) {
