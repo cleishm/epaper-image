@@ -740,6 +740,39 @@ void test_math_sin(void) {
     TEST_ASSERT_TRUE(isnan(epi_sin_d(NAN)));
 }
 
+/* ---- epi_sqrt_d ----
+ * The contract is within 1 ulp. libm's sqrt is correctly rounded (IEEE 754), so
+ * it is the reference here. */
+
+void test_math_sqrt_d(void) {
+    uint64_t s = UINT64_C(0x3C6EF372FE94F82A);
+    double worst = 0.0;
+    unsigned long differ = 0, n = 0;
+    /* Every normal exponent, then the range the hull's normals reach. */
+    for (int i = 0; i < 1 << 20; i++) {
+        uint64_t u = xorshift64(&s);
+        uint64_t exp = i & 1 ? 1 + (u >> 52) % 2046 : 1023 - 100 + (u >> 52) % 120;
+        double x = epi_dfrom((u & ((UINT64_C(1) << 52) - 1)) | (exp << 52));
+        double e = ulps(epi_sqrt_d(x), sqrt(x));
+        differ += e != 0.0;
+        worst = e > worst ? e : worst;
+        n++;
+    }
+    printf("  sqrt_d: worst %.3f ulp vs libm; %lu of %lu differ\n", worst, differ, n);
+    TEST_ASSERT_TRUE(worst <= 1.0);
+    /* Exact results. */
+    TEST_ASSERT_TRUE(epi_dbits(epi_sqrt_d(0.0)) == epi_dbits(0.0));
+    TEST_ASSERT_TRUE(epi_sqrt_d(1.0) == 1.0);
+    TEST_ASSERT_TRUE(epi_sqrt_d(0.25) == 0.5);
+    for (int k = 1; k < 1 << 16; k += 3) {
+        TEST_ASSERT_TRUE(epi_sqrt_d((double)k * k) == (double)k);
+    }
+    for (int j = -500; j <= 500; j++) {
+        TEST_ASSERT_TRUE(epi_sqrt_d(ldexp(1.0, 2 * j)) == ldexp(1.0, j));
+    }
+    TEST_ASSERT_TRUE(epi_sqrt_d(0x1p-1022) == 0x1p-511);
+}
+
 /* ---- determinism fingerprints ---- */
 
 typedef struct {
@@ -769,6 +802,7 @@ static void fnv_i32(fnv_t* f, int32_t v) {
 #define FP_SMOOTHSTEP UINT64_C(0xc89e46305aeffc0c)
 #define FP_CBRT_D UINT64_C(0x0406eb45fadcc85c)
 #define FP_EXP_D UINT64_C(0x5e3bd3558603da42)
+#define FP_SQRT_D UINT64_C(0x4822015173b03f12)
 
 static int fp_report(const char* name, uint64_t got, uint64_t want) {
     printf("fingerprint %-14s 0x%016" PRIx64 "%s\n", name, got, got == want ? "" : "  MISMATCH");
@@ -869,6 +903,18 @@ void test_math_fingerprints(void) {
     }
     fnv_u64(&f, epi_dbits(epi_cbrt_d(epi_dfrom(UINT64_C(0x3FFFFFFFFFFFFFFF)))), 8);
     ok &= fp_report("cbrt_d", f.h, FP_CBRT_D);
+
+    /* sqrt_d: random mantissas over every normal exponent, built only from bit
+     * patterns, and the ends. */
+    fnv_init(&f);
+    xs64_state = UINT64_C(0xA54FF53A5F1D36F1);
+    for (int i = 0; i < 1 << 18; i++) {
+        uint64_t u = xorshift64(&xs64_state);
+        fnv_u64(&f, epi_dbits(epi_sqrt_d(epi_dfrom((u >> 12) | ((uint64_t)(1 + i % 2046) << 52)))), 8);
+    }
+    fnv_u64(&f, epi_dbits(epi_sqrt_d(0x1p-1022)), 8);
+    fnv_u64(&f, epi_dbits(epi_sqrt_d(0x1.fffffffffffffp+1023)), 8);
+    ok &= fp_report("sqrt_d", f.h, FP_SQRT_D);
 
     /* exp_d: dyadic inputs (exact sums of powers of two) on a grid through the
      * underflow to 0, densely over [−64, 0], and random 53-bit ones in

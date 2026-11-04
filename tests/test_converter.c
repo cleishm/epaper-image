@@ -250,7 +250,7 @@ void test_converter_corrupt_tables(void) {
     COLOUR_CASE(col, false, t.base.kernel_radius = EPI_MAX_KERNEL_RADIUS + 1);
     COLOUR_CASE(col, true, t.hull_face_count = EPI_MAX_HULL_FACES);
     COLOUR_CASE(col, false, t.hull_face_count = EPI_MAX_HULL_FACES + 1);
-    COLOUR_CASE(col, false, t.lstar_min = 0);
+    COLOUR_CASE(col, true, t.lstar_min = 0);
     COLOUR_CASE(col, false, t.lstar_min = -1);
     COLOUR_CASE(col, false, t.lstar_min = t.lstar_max);
     COLOUR_CASE(col, false, t.lstar_min = t.lstar_max + 1);
@@ -586,20 +586,20 @@ void test_converter_drain_violation(void) {
 #define GOLDEN_H 119
 static const uint64_t goldens[4][4] = {
     /* gradient */ {
-        UINT64_C(0x210aeeb143312603),
-        UINT64_C(0x815dbb51d4580fc5),
+        UINT64_C(0x0bf5e2077a821170),
+        UINT64_C(0x7f3d52378074de47),
         UINT64_C(0xf204db3a980a04d2),
-        UINT64_C(0xae1789d0dea90345)
+        UINT64_C(0x3780bd0534eb5f6f)
     },
     /* hue ramp */
-    {UINT64_C(0x8a03ba4d1c288b09),
-     UINT64_C(0x8d1d0a9a69148466),
+    {UINT64_C(0x9d4dc2fbdafc4ca7),
+     UINT64_C(0xd2ebbd4e7f3d4665),
      UINT64_C(0x8d59366fd6be59fb),
-     UINT64_C(0x81b571285c28f70c)},
+     UINT64_C(0x96f1db3bc27baebf)},
     /* noise */
     {UINT64_C(0x985efafc0476a139),
      UINT64_C(0x97cfd80723db6928),
-     UINT64_C(0x8e969684418e8cff),
+     UINT64_C(0xbbc6ce0a6b0cd2fb),
      UINT64_C(0xaabafe48ab064f34)},
     /* page (neutral, so Vivid = Default) */
     {UINT64_C(0xc8c7ab0c7aa6a1aa),

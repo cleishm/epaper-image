@@ -78,4 +78,8 @@ int32_t epi_grey_lstar_q8(int32_t y_q16);
  * it would reach 100 (L*min ≥ 66.29). */
 int epi_midtone_monotone(int32_t lstar_min_q8);
 
+/* CIELAB f and f⁻¹ in deterministic double, for init-time code. */
+double epi_lab_f_d(double t);
+double epi_lab_finv_d(double f);
+
 #endif /* EPI_INTENT_H */

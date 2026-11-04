@@ -143,7 +143,7 @@ int main(void) {
         size_t size = epi_grey_panel_size(&cfg);
         void* storage = size ? malloc(size) : NULL;
         const epi_panel_t* rt = NULL;
-        if (storage == NULL || epi_grey_panel_init(&cfg, storage, size, &rt) != EPI_OK) {
+        if (storage == NULL || epi_grey_panel_init(&cfg, storage, size, &rt, NULL) != EPI_OK) {
             fail(id, "epi_grey_panel_init rejected the levels");
             free(storage);
             continue;

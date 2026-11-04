@@ -4,7 +4,8 @@
  *
  * Integer code only shifts unsigned values right and forms signed results
  * by negating unsigned magnitudes, so nothing here is implementation-defined.
- * The only floating point is in epi_cbrt_d, epi_exp_d and epi_sin_d (init-time).
+ * The only floating point is in epi_cbrt_d, epi_sqrt_d, epi_exp_d, epi_sin_d and
+ * epi_gaussian_kernel_q15 (init-time).
  */
 #include "epi_math.h"
 
@@ -301,6 +302,42 @@ double epi_cbrt_d(double x) {
 }
 
 /*
+ * sqrt in double, no libm (init-time: the colour panels' unit normals), on the
+ * domain in epi_math.h. x = m·2^(2k) with m in [1, 4), so sqrt(x) = sqrt(m)·2^k.
+ * The linear start is within 6% of sqrt(m) on [1, 4]; each Newton step squares
+ * the relative error (about e²/2), so four reach about 2^-80. The correction
+ * then uses the residual m − y² computed exactly (Dekker), as in epi_cbrt_d: the
+ * result is the correctly rounded sqrt(m) except in near-halfway cases. Scaling
+ * by 2^k is an exact multiply by a normal power of two, and all constants are
+ * dyadic or exact in their literals.
+ */
+double epi_sqrt_d(double x) {
+    if (x == 0.0) {
+        return x;
+    }
+    uint64_t u = epi_dbits(x);
+    const uint64_t mant = (UINT64_C(1) << 52) - 1u;
+    int e = (int)(u >> 52) - 1023;
+    int r = e % 2;
+    if (r < 0) {
+        r += 2;
+    }
+    int k = (e - r) / 2;
+    double m = epi_dfrom((u & mant) | ((uint64_t)(1023 + r) << 52)); /* [1, 4) */
+
+    double y = 0.6875 + 0.34375 * m;
+    for (int i = 0; i < 4; i++) {
+        y = 0.5 * (y + m / y);
+    }
+    double p, pe;
+    epi_two_prod(y, y, &p, &pe);
+    double res = (m - p) - pe; /* m − y²; m − p is exact (Sterbenz) */
+    y = y + res / (2.0 * y);
+
+    return y * epi_pow2_d(k);
+}
+
+/*
  * exp in double, no libm (init-time: the grey panels' Gaussian kernel), on
  * the domain in epi_math.h.
  * Cody–Waite reduction x = k·ln2 + r with k = nearest integer to x/ln2 and
@@ -454,6 +491,34 @@ double epi_sin_d(double x) {
     default:
         return -epi_k_cos(y0, y1);
     }
+}
+
+/* The sum is sequential, in the same double operations as tools/panelgen's
+ * kernel_q15; for every σ = k/100 in (0, 10.5] as a float this reproduces
+ * panelgen's taps exactly. */
+int epi_gaussian_kernel_q15(float sigma_f, uint16_t* taps) {
+    const double sigma = sigma_f;
+    const double r3 = 3.0 * sigma; /* exact: a float times 3 fits a double */
+    int r = (int)r3;
+    if ((double)r < r3) {
+        r++;
+    }
+    double w[2 * 32 + 1]; /* EPI_MAX_KERNEL_RADIUS, r ≤ 32 for σ ≤ 10.5 */
+    const double den = 2.0 * sigma * sigma;
+    double sum = 0.0;
+    for (int i = -r; i <= r; i++) {
+        double di = (double)i;
+        w[i + r] = epi_exp_d(-(di * di) / den);
+        sum += w[i + r];
+    }
+    int32_t total = 0;
+    for (int j = 0; j <= 2 * r; j++) {
+        int32_t tap = (int32_t)((w[j] / sum) * 32768.0 + 0.5);
+        taps[j] = (uint16_t)tap;
+        total += tap;
+    }
+    taps[r] = (uint16_t)(taps[r] + (32768 - total));
+    return r;
 }
 
 /* ---- Tables (const, so in flash on ESP32). Generated offline with exact

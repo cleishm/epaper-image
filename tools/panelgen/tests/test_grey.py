@@ -10,12 +10,11 @@ import subprocess
 import sys
 from fractions import Fraction
 
-import numpy as np
 import pytest
 
 from panelgen import PANELGEN_DIR, REPO
 from panelgen.gen import kernel_q15
-from panelgen.grey import GreyError, cbrt_d, derive_grey, exp_d, kernel_c, load_levels, render_grey
+from panelgen.grey import GreyError, _f32, cbrt_d, derive_grey, exp_d, kernel_c, load_levels, render_grey
 from panelgen.panels import GDEY075T7, GREY_PANELS
 
 PLACEHOLDER = PANELGEN_DIR / "tests" / "grey-levels-placeholder.json"
@@ -74,7 +73,7 @@ def test_kernel_c_matches_panelgen_kernel_for_every_centi_sigma():
     # epi_grey_panel.c claims it reproduces kernel_q15 for every float sigma = k/100.
     for k in range(1, 1051):
         s = k / 100
-        assert kernel_c(s) == kernel_q15(float(np.float32(s)))[0], s
+        assert kernel_c(s) == kernel_q15(_f32(s)), s
 
 
 def test_cbrt_exp_mirrors_are_accurate():

@@ -46,6 +46,8 @@ typedef enum {
     /** The source image is larger than the resampler accepts (see
      *  #epi_resampler_config_t). */
     EPI_ERR_SOURCE_TOO_LARGE,
+    /** The caller's progress callback stopped epi_colour_panel_init(). */
+    EPI_ERR_CANCELLED,
 } epi_err_t;
 
 /**
@@ -68,7 +70,8 @@ typedef struct {
 typedef struct {
     /** Value written to the panel for this ink. */
     uint8_t code;
-    /** Ideal colour of the ink, for nominal previews. */
+    /** Ideal colour of the ink, for nominal previews. A colour panel's init also
+     *  compares these to check which ink is white: all zero skips that check. */
     epi_rgb_t nominal;
     /** What the panel shows: drives matching, error and measured previews. */
     epi_rgb_t measured;
@@ -181,6 +184,16 @@ size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg);
  * Deep (tone 1), each with detail 0.75, adapt 0.5 (ignored on grey),
  * vibrance 1 (ignored on grey) and veil 0.
  *
+ * @param cfg     The panel to build.
+ * @param storage Storage for the panel.
+ * @param size    Bytes at @p storage.
+ * @param out     Set to the panel on success, else to NULL.
+ * @param reason  May be NULL. Set to NULL on entry, and on every EPI_ERR_INVALID_ARG
+ *                return to a short static NUL-terminated English string saying why
+ *                the config or levels were rejected; it stays NULL on EPI_OK and on
+ *                EPI_ERR_WORKSPACE_TOO_SMALL. For logs and people: the wording may
+ *                change, so don't compare or parse it.
+ *
  * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer, a zero size, a
  *         level count outside 2..16, sigma outside (0, 10.5], levels whose
  *         luminance is not strictly increasing (after rounding to 1/65536
@@ -189,7 +202,126 @@ size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg);
  *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
  *         epi_grey_panel_size(). @p *out is NULL on error.
  */
-epi_err_t epi_grey_panel_init(const epi_grey_panel_config_t* cfg, void* storage, size_t size, const epi_panel_t** out);
+epi_err_t epi_grey_panel_init(
+    const epi_grey_panel_config_t* cfg,
+    void* storage,
+    size_t size,
+    const epi_panel_t** out,
+    const char** reason
+);
+
+/**
+ * @brief Progress callback of epi_colour_panel_init().
+ *
+ * Called regularly during the slow part of init, with @p done counting up from 1
+ * and reaching @p total on success; divide by @p total, which is not a fixed
+ * number. It may yield or delay the calling task. It must not touch the storage
+ * that init is filling or change the config, and it runs on init's stack, on top
+ * of its stack use. It has no effect on the panel built.
+ *
+ * @param ctx   The config's @c progress_ctx.
+ * @param done  Steps finished so far.
+ * @param total Steps in all.
+ * @return true to continue; false to cancel, whereupon init returns
+ *         #EPI_ERR_CANCELLED (also when @p done equals @p total).
+ */
+typedef bool (*epi_progress_fn_t)(void* ctx, unsigned done, unsigned total);
+
+/**
+ * @brief A colour panel described by its measured inks (see
+ *        epi_colour_panel_init()).
+ */
+typedef struct {
+    /** Glass or mode name; not copied, so it must outlive the panel. */
+    const char* name;
+    /** Native size in pixels, each ≥ 1. */
+    uint16_t width, height;
+    /**
+     * @c ink_count inks, in the order the panel should match them (ties go to
+     * the earlier ink); codes are free (they are what the panel is sent).
+     * Copied by epi_colour_panel_init(), so this array may be freed afterwards.
+     */
+    const epi_ink_t* inks;
+    /** 5..16: four inks can't surround the neutral axis. */
+    size_t ink_count;
+    /** Detail blur sigma in panel pixels, in (0, 10.5] (radius ⌈3σ⌉ ≤ 32). */
+    float detail_sigma;
+    /** Optional; NULL for none. Called during init (see #epi_progress_fn_t).
+     *  Ignored by epi_colour_panel_size(). */
+    epi_progress_fn_t progress;
+    /** Passed to @c progress. */
+    void* progress_ctx;
+} epi_colour_panel_config_t;
+
+/**
+ * @brief Storage bytes epi_colour_panel_init() needs for @p cfg, or 0 if the
+ *        structure of @p cfg is invalid.
+ *
+ * Checks the pointers, sizes, ink count and sigma. The inks are validated by
+ * epi_colour_panel_init(), because that check is its slow part, so a non-zero
+ * size does not mean the inks are accepted. Includes alignment slack, so any
+ * storage pointer may be passed.
+ */
+size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
+
+/**
+ * @brief Build a colour panel in caller-provided storage from measured inks.
+ *
+ * The storage holds the #epi_panel_t, its derived tables (the ink hull, the
+ * adaptation and OKLab matrices, the cusp table, the inks in linear sRGB and
+ * OKLab, and the Q15 Gaussian detail kernel) and a copy of the inks; it must
+ * outlive the panel and every converter using it, and needs no particular
+ * alignment or contents. Its contents are unspecified after an error.
+ * @c cfg->inks may point into the storage, to re-init from a panel's own inks.
+ * Nothing is allocated. Init uses only deterministic arithmetic and no libm, so
+ * the same config gives the same panel on every target.
+ *
+ * Deriving the cusp table costs about a million in-gamut tests in double. On a target
+ * without a double-precision FPU init therefore blocks for many seconds (about 15 s
+ * on a 240 MHz ESP32-S3), without yielding unless @c cfg->progress does. Firmware for such a target should call it
+ * once at startup and have @c progress yield or feed the task watchdog, or
+ * generate a const panel with tools/panelgen. Inks that are rejected are usually
+ * rejected much sooner. Init uses about 2.4 KB of stack, and @c progress runs on
+ * top of it.
+ *
+ * The panel offers four presets: Default (tone 0.5), Soft (tone 0), Deep (tone 1)
+ * and Vivid (tone 0.5, vibrance 1.3), each with detail 0.75, adapt 0.5, vibrance 1
+ * unless stated and veil 0.
+ *
+ * @param cfg     The panel to build.
+ * @param storage Storage for the panel.
+ * @param size    Bytes at @p storage.
+ * @param out     Set to the panel on success, else to NULL.
+ * @param reason  May be NULL. Set to NULL on entry, and on every EPI_ERR_INVALID_ARG
+ *                return to a short static NUL-terminated English string saying why
+ *                the config or inks were rejected; it stays NULL on EPI_OK and on
+ *                EPI_ERR_WORKSPACE_TOO_SMALL and EPI_ERR_CANCELLED. For logs and
+ *                people: the wording may change, so don't compare or parse it.
+ *
+ * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer (@c cfg is judged
+ *         first, then @p storage and @p out), a zero size, an ink count outside
+ *         5..16, sigma outside (0, 10.5], or inks that can't make a panel: inks
+ *         not spanning three dimensions; a white ink (the largest measured Y)
+ *         whose nominal Y is below another ink's; a white ink with X, Y or Z at
+ *         or below 512/65536, or with a zero channel in linear sRGB; a black
+ *         ink (the smallest Y) not below white's Y; an ink with twice or more of
+ *         a cone response of the white ink's; a neutral axis, the line through
+ *         the origin and white, that misses the hull; a neutral range whose
+ *         darkest L* is below 0 or 66.29 or more, or that spans under 1 L*; a
+ *         probe at chroma 200 inside the hull; or a hue whose most saturated
+ *         in-hull colour is within 0.5 L* of the ends of the neutral range;
+ *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
+ *         epi_colour_panel_size(), before the inks are looked at;
+ *         EPI_ERR_CANCELLED if @c cfg->progress returned false. @p *out is NULL
+ *         on error.
+ */
+epi_err_t epi_colour_panel_init(
+    const epi_colour_panel_config_t* cfg,
+    void* storage,
+    size_t size,
+    const epi_panel_t** out,
+    const char** reason
+);
 
 /* ---- Converter: panel-sized RGB rows in, ink-code rows out --------------- */
 
@@ -224,7 +356,8 @@ size_t epi_converter_workspace_size(const epi_config_t* cfg);
  *
  * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer, a zero width or
  *         height, a panel without valid tables (a built-in calibration or
- *         one from epi_grey_panel_init()), or an intent value out of range;
+ *         one from epi_colour_panel_init() or epi_grey_panel_init()), or an
+ *         intent value out of range;
  *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
  *         epi_converter_workspace_size(). @p *out is NULL on error.
  */

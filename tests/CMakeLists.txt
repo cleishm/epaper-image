@@ -35,6 +35,7 @@ add_executable(epaper_image_tests
     test_intent.c
     test_converter.c
     test_grey.c
+    test_colour_panel.c
     test_resampler.c
     test_preview.c
 )

@@ -16,6 +16,8 @@ const char* epi_strerror(epi_err_t err) {
         return "all rows already processed";
     case EPI_ERR_SOURCE_TOO_LARGE:
         return "source too large";
+    case EPI_ERR_CANCELLED:
+        return "cancelled";
     }
     return "unknown error";
 }

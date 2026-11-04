@@ -46,7 +46,7 @@ struct epi_converter {
     epi_dither_ctx_t dither;
 };
 
-/* Tables as panelgen or epi_grey_panel_init builds them, so the intent and the
+/* Tables as panelgen, epi_colour_panel_init or epi_grey_panel_init builds them, so the intent and the
  * ditherer can rely on them.
  * The kind must be one of the two and is trusted to match the object: it
  * selects the struct, so a relabelled table cannot be told from a real one.
@@ -71,7 +71,7 @@ static bool tables_valid(const epi_panel_tables_t* base) {
         lmin = epi_grey_lstar_q8(t->level_y[0]);
     } else if (base->kind == EPI_PANEL_COLOUR) {
         const epi_colour_tables_t* t = epi_colour_tables(base);
-        if (t->hull_face_count > EPI_MAX_HULL_FACES || t->lstar_min <= 0 || t->lstar_min >= t->lstar_max ||
+        if (t->hull_face_count > EPI_MAX_HULL_FACES || t->lstar_min < 0 || t->lstar_min >= t->lstar_max ||
             t->lstar_max > 100 * 256 || t->black_xyz[1] < 0 || t->black_xyz[1] >= t->white_xyz[1]) {
             return false;
         }

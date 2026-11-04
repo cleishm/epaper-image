@@ -143,8 +143,8 @@ jobs:
         run: ctest --test-dir build-wasm --output-on-failure
 
   panelgen:
-    # macOS: the committed tables were generated there, and --check fails on
-    # other platforms (tools/panelgen/README.md).
+    # Any Unix with a C compiler generates the same files; on Windows the headers
+    # differ (tools/panelgen/README.md).
     runs-on: macos-latest
     name: macos-latest / panelgen
 
