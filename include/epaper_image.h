@@ -184,6 +184,16 @@ size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg);
  * Deep (tone 1), each with detail 0.75, adapt 0.5 (ignored on grey),
  * vibrance 1 (ignored on grey) and veil 0.
  *
+ * @param cfg     The panel to build.
+ * @param storage Storage for the panel.
+ * @param size    Bytes at @p storage.
+ * @param out     Set to the panel on success, else to NULL.
+ * @param reason  May be NULL. Set to NULL on entry, and on every EPI_ERR_INVALID_ARG
+ *                return to a short static NUL-terminated English string saying why
+ *                the config or levels were rejected; it stays NULL on EPI_OK and on
+ *                EPI_ERR_WORKSPACE_TOO_SMALL. For logs and people: the wording may
+ *                change, so don't compare or parse it.
+ *
  * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer, a zero size, a
  *         level count outside 2..16, sigma outside (0, 10.5], levels whose
  *         luminance is not strictly increasing (after rounding to 1/65536
@@ -192,7 +202,13 @@ size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg);
  *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
  *         epi_grey_panel_size(). @p *out is NULL on error.
  */
-epi_err_t epi_grey_panel_init(const epi_grey_panel_config_t* cfg, void* storage, size_t size, const epi_panel_t** out);
+epi_err_t epi_grey_panel_init(
+    const epi_grey_panel_config_t* cfg,
+    void* storage,
+    size_t size,
+    const epi_panel_t** out,
+    const char** reason
+);
 
 /**
  * @brief Progress callback of epi_colour_panel_init().

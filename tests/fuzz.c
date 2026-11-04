@@ -422,7 +422,13 @@ static const epi_panel_t* rand_grey(uint8_t* store, size_t cap) {
     if (!need || need > cap) {
         return NULL;
     }
-    if (epi_grey_panel_init(&g, store + ru(16), need, &p) != EPI_OK) {
+    const char* why = "stale";
+    const epi_err_t e = epi_grey_panel_init(&g, store + ru(16), need, &p, &why);
+    CHECK(
+        (e == EPI_OK && why == NULL) || (e == EPI_ERR_INVALID_ARG && why != NULL && why[0] != '\0'),
+        "grey init reason does not match the result"
+    );
+    if (e != EPI_OK) {
         return NULL;
     }
     return p;

@@ -133,7 +133,7 @@ static const epi_panel_t* free_code_grey(void) {
     size_t size = epi_grey_panel_size(&cfg);
     TEST_ASSERT_TRUE(size != 0 && size <= sizeof grey_storage.bytes);
     const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, grey_storage.bytes, size, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, grey_storage.bytes, size, &p, NULL));
     return p;
 }
 
@@ -431,7 +431,7 @@ void test_preview_checkerboard(void) {
     size_t gsize = epi_grey_panel_size(&g);
     TEST_ASSERT_TRUE(gsize != 0 && gsize <= sizeof grey_storage.bytes);
     const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&g, grey_storage.bytes, gsize, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&g, grey_storage.bytes, gsize, &p, NULL));
 
     enum { W = 8, H = 6 };
     uint8_t codes[W * H];

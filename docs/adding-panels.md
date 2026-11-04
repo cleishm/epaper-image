@@ -87,6 +87,7 @@ This needs no generated code. Pass the levels, darkest first, to
 `epi_grey_panel_init`:
 
 ```c
+#include <stdio.h>
 #include <stdlib.h>
 
 #include <epaper_image.h>
@@ -112,7 +113,10 @@ const epi_panel_t* make_panel(void) {
     size_t size = epi_grey_panel_size(&grey); /* 0 if the config is invalid */
     void* storage = size ? malloc(size) : NULL;
     const epi_panel_t* panel = NULL;
-    if (storage && epi_grey_panel_init(&grey, storage, size, &panel) != EPI_OK) {
+    const char* reason = NULL; /* why the config or levels were rejected, for logs */
+    epi_err_t err = epi_grey_panel_init(&grey, storage, size, &panel, &reason);
+    if (err != EPI_OK) {
+        fprintf(stderr, "grey panel: %s%s%s\n", epi_strerror(err), reason ? ": " : "", reason ? reason : "");
         free(storage);
     }
     return panel; /* NULL on failure */

@@ -54,7 +54,7 @@ static const epi_panel_t* build(storage_t* st, const epi_ink_t* levels, size_t n
     TEST_ASSERT_NOT_EQUAL(0, size);
     TEST_ASSERT_TRUE(size <= sizeof st->bytes);
     const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &p, NULL));
     TEST_ASSERT_NOT_NULL(p);
     return p;
 }
@@ -119,21 +119,45 @@ void test_grey_panel_validation(void) {
     TEST_ASSERT_NOT_EQUAL(0, size);
     storage_t* st = &scratch_storage;
     const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&ok, st->bytes, size, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&ok, st->bytes, size, &p, NULL));
     TEST_ASSERT_NOT_NULL(p);
+
+    const char* why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&ok, st->bytes, size, &p, &why));
+    TEST_ASSERT_NULL(why); /* success clears a stale reason */
 
     TEST_ASSERT_EQUAL_size_t(0, epi_grey_panel_size(NULL));
     p = panel4();
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(NULL, st->bytes, size, &p));
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(NULL, st->bytes, size, &p, &why));
     TEST_ASSERT_NULL(p);
+    TEST_ASSERT_EQUAL_STRING("config is NULL", why);
     p = panel4();
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&ok, NULL, size, &p));
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&ok, NULL, size, &p, &why));
     TEST_ASSERT_NULL(p);
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&ok, st->bytes, size, NULL));
+    TEST_ASSERT_EQUAL_STRING("storage or out is NULL", why);
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&ok, st->bytes, size, NULL, &why));
+    TEST_ASSERT_EQUAL_STRING("storage or out is NULL", why);
+    /* An invalid config is reported as such even when the storage is NULL too. */
+    epi_grey_panel_config_t one_level = ok;
+    one_level.level_count = 1;
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&one_level, NULL, 0, &p, &why));
+    TEST_ASSERT_EQUAL_STRING("a grey panel needs 2 to 16 levels", why);
+    /* A NULL reason is accepted on every kind of return. */
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(NULL, st->bytes, size, &p, NULL));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_grey_panel_init(&ok, st->bytes, size, NULL, NULL));
     p = panel4();
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&ok, st->bytes, size - 1, &p));
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&ok, st->bytes, size - 1, &p, &why));
     TEST_ASSERT_NULL(p);
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&ok, st->bytes, 0, &p));
+    TEST_ASSERT_NULL(why);
+    why = "stale";
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&ok, st->bytes, 0, &p, &why));
+    TEST_ASSERT_NULL(why);
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&ok, st->bytes, 0, &p, NULL));
 
     /* Equal, decreasing, lighter-than-last, too-light-darkest levels. */
     static const epi_ink_t equal[3] = {
@@ -157,35 +181,56 @@ void test_grey_panel_validation(void) {
     };
     static const epi_ink_t dup_codes[2] = {{7, {0, 0, 0}, {20, 20, 20}}, {7, {0, 0, 0}, {200, 200, 200}}};
 
+    const char* bad_reason[20];
     epi_grey_panel_config_t bad[20];
     int nbad = 0;
+    bad_reason[nbad] = "name or levels is NULL";
     bad[nbad] = ok, bad[nbad++].name = NULL;
+    bad_reason[nbad] = "name or levels is NULL";
     bad[nbad] = ok, bad[nbad++].levels = NULL;
+    bad_reason[nbad] = "zero width or height";
     bad[nbad] = ok, bad[nbad++].width = 0;
+    bad_reason[nbad] = "zero width or height";
     bad[nbad] = ok, bad[nbad++].height = 0;
+    bad_reason[nbad] = "a grey panel needs 2 to 16 levels";
     bad[nbad] = ok, bad[nbad++].level_count = 1;
+    bad_reason[nbad] = "a grey panel needs 2 to 16 levels";
     bad[nbad] = ok, bad[nbad++].level_count = 0;
+    bad_reason[nbad] = "a grey panel needs 2 to 16 levels";
     bad[nbad] = ok, bad[nbad].levels = panel16()->inks, bad[nbad++].level_count = 17;
+    bad_reason[nbad] = "detail sigma outside (0, 10.5]";
     bad[nbad] = ok, bad[nbad++].detail_sigma = 0.0f;
+    bad_reason[nbad] = "detail sigma outside (0, 10.5]";
     bad[nbad] = ok, bad[nbad++].detail_sigma = -1.0f;
+    bad_reason[nbad] = "detail sigma outside (0, 10.5]";
     bad[nbad] = ok, bad[nbad++].detail_sigma = 10.500001f;
+    bad_reason[nbad] = "detail sigma outside (0, 10.5]";
     bad[nbad] = ok, bad[nbad++].detail_sigma = NAN;
+    bad_reason[nbad] = "detail sigma outside (0, 10.5]";
     bad[nbad] = ok, bad[nbad++].detail_sigma = INFINITY;
+    bad_reason[nbad] = "level luminance is not strictly increasing";
     bad[nbad] = ok, bad[nbad].levels = equal, bad[nbad++].level_count = 3;
+    bad_reason[nbad] = "a level is lighter than the last";
     bad[nbad] = ok, bad[nbad].levels = decreasing, bad[nbad++].level_count = 2;
+    bad_reason[nbad] = "a level is lighter than the last";
     bad[nbad] = ok, bad[nbad].levels = lighter, bad[nbad++].level_count = 2;
+    bad_reason[nbad] = "darkest level is too light for the tone curve";
     bad[nbad] = ok, bad[nbad].levels = too_light, bad[nbad++].level_count = 2;
+    bad_reason[nbad] = "lightest level has no luminance";
     bad[nbad] = ok, bad[nbad].levels = all_black, bad[nbad++].level_count = 2;
+    bad_reason[nbad] = "level luminance is not strictly increasing";
     bad[nbad] = ok, bad[nbad].levels = dip, bad[nbad++].level_count = 3;
     for (int i = 0; i < nbad; i++) {
         char msg[32];
         snprintf(msg, sizeof msg, "bad config %d", i);
         TEST_ASSERT_EQUAL_size_t_MESSAGE(0, epi_grey_panel_size(&bad[i]), msg);
         p = panel4();
+        why = "stale";
         TEST_ASSERT_EQUAL_INT_MESSAGE(
-            EPI_ERR_INVALID_ARG, epi_grey_panel_init(&bad[i], st->bytes, sizeof st->bytes, &p), msg
+            EPI_ERR_INVALID_ARG, epi_grey_panel_init(&bad[i], st->bytes, sizeof st->bytes, &p, &why), msg
         );
         TEST_ASSERT_NULL(p);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(bad_reason[i], why, msg);
     }
 
     /* Accepted: the ends of the sigma range, a true black, the lightest
@@ -207,7 +252,7 @@ void test_grey_panel_validation(void) {
         snprintf(msg, sizeof msg, "good config %d", i);
         size_t s = epi_grey_panel_size(&good[i]);
         TEST_ASSERT_NOT_EQUAL_MESSAGE(0, s, msg);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(EPI_OK, epi_grey_panel_init(&good[i], st->bytes, s, &p), msg);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(EPI_OK, epi_grey_panel_init(&good[i], st->bytes, s, &p, NULL), msg);
         /* Every accepted panel also makes a converter (tables_valid agrees). */
         epi_config_t cc = config(p, 9, 3);
         size_t ws = epi_converter_workspace_size(&cc);
@@ -218,9 +263,9 @@ void test_grey_panel_validation(void) {
         free(w);
     }
     /* σ = 10.5 reaches the largest radius; a tiny σ is a unit impulse. */
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&good[0], st->bytes, sizeof st->bytes, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&good[0], st->bytes, sizeof st->bytes, &p, NULL));
     TEST_ASSERT_EQUAL_UINT8(EPI_MAX_KERNEL_RADIUS, p->tables->kernel_radius);
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&good[1], st->bytes, sizeof st->bytes, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&good[1], st->bytes, sizeof st->bytes, &p, NULL));
     TEST_ASSERT_EQUAL_UINT8(1, p->tables->kernel_radius);
     TEST_ASSERT_EQUAL_UINT16(0, p->tables->kernel[0]);
     TEST_ASSERT_EQUAL_UINT16(32768, p->tables->kernel[1]);
@@ -233,11 +278,11 @@ void test_grey_panel_reinit_from_own_inks(void) {
     epi_grey_panel_config_t cfg = {"TEST", 800, 480, levels4, 4, 6.0f};
     size_t size = epi_grey_panel_size(&cfg);
     const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &p));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &p, NULL));
     cfg.levels = p->inks;
     cfg.detail_sigma = 4.0f;
     const epi_panel_t* q = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &q));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, st->bytes, size, &q, NULL));
     TEST_ASSERT_EQUAL_size_t(4, q->ink_count);
     for (int i = 0; i < 4; i++) {
         TEST_ASSERT_EQUAL_UINT8(levels4[i].code, q->inks[i].code);
@@ -258,8 +303,8 @@ void test_grey_panel_storage(void) {
     const epi_panel_t* p = NULL;
     for (int off = 0; off < 32; off++) {
         memset(buf, off & 1 ? 0xff : 0xa5, size + 64);
-        TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&cfg, buf + off, size - 1, &p));
-        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, buf + off, size, &p));
+        TEST_ASSERT_EQUAL_INT(EPI_ERR_WORKSPACE_TOO_SMALL, epi_grey_panel_init(&cfg, buf + off, size - 1, &p, NULL));
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, buf + off, size, &p, NULL));
         TEST_ASSERT_TRUE((const uint8_t*)p >= buf + off);
         TEST_ASSERT_TRUE((const uint8_t*)p + sizeof *p <= buf + off + size);
         TEST_ASSERT_TRUE((const uint8_t*)p->tables + sizeof(epi_grey_tables_t) <= buf + off + size);
@@ -1115,7 +1160,7 @@ void test_grey_light_black_knee(void) {
         const epi_panel_t* p = NULL;
         TEST_ASSERT_TRUE(epi_grey_panel_size(&cfg) <= sizeof scratch_storage.bytes);
         TEST_ASSERT_EQUAL_INT(
-            EPI_OK, epi_grey_panel_init(&cfg, scratch_storage.bytes, sizeof scratch_storage.bytes, &p)
+            EPI_OK, epi_grey_panel_init(&cfg, scratch_storage.bytes, sizeof scratch_storage.bytes, &p, NULL)
         );
         for (int t = 0; t <= 4; t++) {
             epi_intent_t in = {t / 4.0f, 0.75f, 0.5f, 1.0f, 0.0f};

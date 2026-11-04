@@ -747,7 +747,8 @@ pointer. It validates the config: a non-NULL name and levels, sizes ≥ 1, 2 to
 16 levels, σ in (0, 10.5] (so r = ⌈3σ⌉ ≤ 32), a lightest level with Y > 0, `level_y` strictly increasing
 in Q16, and a darkest level for which the midtone curve has a monotone knee
 (L\*min below 66.29). Codes are free; `epi_pack_row` checks that they fit its
-format.
+format. A rejection returns `EPI_ERR_INVALID_ARG` with a short English reason, for
+logs and people.
 
 It then derives `level_y`, the thresholds and the Gaussian kernel. The
 kernel uses the library's own `epi_exp_d` and the same operations, in the

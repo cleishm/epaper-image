@@ -41,49 +41,70 @@ typedef struct {
 #define GREY_STORAGE_SIZE (sizeof(grey_storage_t) + GREY_ALIGN - 1)
 
 /* Validates cfg and derives each level's Y relative to the last, Q16,
- * rounded once: (Y_i · 2^16 + Y_last/2) / Y_last. */
-static bool derive_levels(const epi_grey_panel_config_t* cfg, int32_t level_y[EPI_MAX_INKS]) {
-    if (cfg == NULL || cfg->name == NULL || cfg->levels == NULL || cfg->width < 1 || cfg->height < 1 ||
-        cfg->level_count < 2 || cfg->level_count > EPI_MAX_INKS) {
-        return false;
+ * rounded once: (Y_i · 2^16 + Y_last/2) / Y_last. NULL when valid, else why not. */
+static const char* derive_levels(const epi_grey_panel_config_t* cfg, int32_t level_y[EPI_MAX_INKS]) {
+    if (cfg == NULL) {
+        return "config is NULL";
+    }
+    if (cfg->name == NULL || cfg->levels == NULL) {
+        return "name or levels is NULL";
+    }
+    if (cfg->width < 1 || cfg->height < 1) {
+        return "zero width or height";
+    }
+    if (cfg->level_count < 2 || cfg->level_count > EPI_MAX_INKS) {
+        return "a grey panel needs 2 to 16 levels";
     }
     /* (0, 10.5]; false for NaN; radius ⌈3σ⌉ ≤ 32 = EPI_MAX_KERNEL_RADIUS. */
     if (!(cfg->detail_sigma > 0.0f && cfg->detail_sigma <= 10.5f)) {
-        return false;
+        return "detail sigma outside (0, 10.5]";
     }
     const size_t n = cfg->level_count;
     const int64_t y_last = epi_srgb_y_q32(cfg->levels[n - 1].measured);
     if (y_last <= 0) {
-        return false;
+        return "lightest level has no luminance";
     }
     for (size_t i = 0; i < n; i++) {
         int64_t y = epi_srgb_y_q32(cfg->levels[i].measured); /* ≤ 2^32: ·2^16 fits */
         if (y > y_last) {
-            return false; /* lighter than the last: the quotient might not fit int32 */
+            return "a level is lighter than the last"; /* the quotient might not fit int32 */
         }
         level_y[i] = (int32_t)((y * EPI_Q16_ONE + y_last / 2) / y_last);
         if (i > 0 && level_y[i] <= level_y[i - 1]) {
-            return false; /* not strictly increasing (or equal after rounding) */
+            return "level luminance is not strictly increasing"; /* or equal after rounding */
         }
     }
     /* The midtone curve needs a monotone knee below 100. */
-    return epi_midtone_monotone(epi_grey_lstar_q8(level_y[0]));
+    return epi_midtone_monotone(epi_grey_lstar_q8(level_y[0])) ? NULL : "darkest level is too light for the tone curve";
 }
 
 size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg) {
     int32_t level_y[EPI_MAX_INKS];
-    if (!derive_levels(cfg, level_y)) {
-        return 0;
-    }
-    return GREY_STORAGE_SIZE;
+    return derive_levels(cfg, level_y) != NULL ? 0 : GREY_STORAGE_SIZE;
 }
 
-epi_err_t epi_grey_panel_init(const epi_grey_panel_config_t* cfg, void* storage, size_t size, const epi_panel_t** out) {
+epi_err_t epi_grey_panel_init(
+    const epi_grey_panel_config_t* cfg,
+    void* storage,
+    size_t size,
+    const epi_panel_t** out,
+    const char** reason
+) {
     if (out != NULL) {
         *out = NULL;
     }
+    if (reason != NULL) {
+        *reason = NULL;
+    }
     int32_t level_y[EPI_MAX_INKS];
-    if (storage == NULL || out == NULL || !derive_levels(cfg, level_y)) {
+    const char* invalid = derive_levels(cfg, level_y);
+    if (invalid == NULL && (storage == NULL || out == NULL)) {
+        invalid = "storage or out is NULL";
+    }
+    if (invalid != NULL) {
+        if (reason != NULL) {
+            *reason = invalid;
+        }
         return EPI_ERR_INVALID_ARG;
     }
     if (size < GREY_STORAGE_SIZE) {
