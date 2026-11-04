@@ -9,15 +9,20 @@
  * and limits at and beyond its edges. Each pipeline must emit exactly as many
  * rows as its configuration promises. The preview reducer and the row packer
  * run the same way on random sizes and codes, including codes they must reject.
+ * Random colour ink sets, plausible and extreme, go through
+ * epi_colour_panel_init, and each panel it accepts converts a small image with
+ * random intents: init must only accept what the converter can run without
+ * undefined behaviour.
  *
  * Every check exits nonzero with a message in every build type; the
  * sanitizers report the memory and undefined-behaviour errors.
  *
- *   epaper_image_fuzz [iterations [seed]]
+ *   epaper_image_fuzz [iterations [seed [colour-iterations]]]
  *
  * iterations (default 3000) is the resampler count; the source-limit check
  * runs as many, and the converter, the reducer and the packer a third as many
- * each. The default seed is fixed,
+ * each. An accepted colour panel costs a million in-gamut tests, so the colour count
+ * is its own, by default a hundredth of iterations. The default seed is fixed,
  * so a run is reproducible; a seed, if given, is mixed into it. Built with
  * -DEPAPER_IMAGE_BUILD_FUZZ=ON;
  * run under ctest, ideally with -fsanitize=address,undefined.
@@ -26,6 +31,7 @@
 
 #include <float.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -682,6 +688,246 @@ static void fuzz_pack(int iters) {
     printf("packer: ok=%ld refused=%ld too-wide=%ld\n", ok, refused, wide);
 }
 
+/* One channel of a random ink: near an end of the range, or anywhere in it. */
+static uint8_t rchannel(uint32_t lo, uint32_t hi) {
+    switch (ru(5)) {
+    case 0:
+        return (uint8_t)(lo + ru(3));
+    case 1:
+        return (uint8_t)(hi - ru(3));
+    default:
+        return (uint8_t)(lo + ru(hi - lo + 1u));
+    }
+}
+
+/* A random ink set: a shipped one perturbed, near-neutral white and black among
+ * saturated inks (with channels close to 0 and 255 included), near-corners of the
+ * cube, a white ink of any tint (a channel of it may be 1) over darker inks in
+ * each channel, or anything at all. */
+static size_t rand_inks_any(epi_ink_t* inks) {
+    const size_t n = 5 + ru(12);
+    memset(inks, 0, 16 * sizeof inks[0]);
+    for (size_t i = 0; i < n; i++) {
+        inks[i].code = (uint8_t)rnd();
+    }
+    switch (ru(6)) {
+    case 0: {
+        const uint32_t amount = 1u + ru(40);
+        for (size_t i = 0; i < 6; i++) {
+            const epi_rgb_t m = epi_panel_el133uf1.inks[i].measured;
+            const int d[3] = {
+                (int)ru(2 * amount + 1u) - (int)amount,
+                (int)ru(2 * amount + 1u) - (int)amount,
+                (int)ru(2 * amount + 1u) - (int)amount,
+            };
+            const int v[3] = {m.r + d[0], m.g + d[1], m.b + d[2]};
+            inks[i].measured.r = (uint8_t)(v[0] < 0 ? 0 : v[0] > 255 ? 255 : v[0]);
+            inks[i].measured.g = (uint8_t)(v[1] < 0 ? 0 : v[1] > 255 ? 255 : v[1]);
+            inks[i].measured.b = (uint8_t)(v[2] < 0 ? 0 : v[2] > 255 ? 255 : v[2]);
+        }
+        return 6;
+    }
+    case 1: {
+        const uint32_t white = 150u + ru(106), black = ru(90);
+        inks[0].measured =
+            (epi_rgb_t){rchannel(white - 3u, white), rchannel(white - 3u, white), rchannel(white - 3u, white)};
+        inks[1].measured =
+            (epi_rgb_t){rchannel(black, black + 3u), rchannel(black, black + 3u), rchannel(black, black + 3u)};
+        for (size_t i = 2; i < n; i++) {
+            inks[i].measured = (epi_rgb_t){rchannel(0, white), rchannel(0, white), rchannel(0, white)};
+        }
+        return n;
+    }
+    case 2:
+        for (size_t i = 0; i < n; i++) {
+            const uint32_t corner = rnd();
+            inks[i].measured.r = (uint8_t)(corner & 1 ? 255 - ru(3) : ru(3));
+            inks[i].measured.g = (uint8_t)(corner & 2 ? 255 - ru(3) : ru(3));
+            inks[i].measured.b = (uint8_t)(corner & 4 ? 255 - ru(3) : ru(3));
+        }
+        return n;
+    case 4: {
+        const uint32_t r = 1u + ru(ru(2) ? 255 : 8), g = 1u + ru(ru(2) ? 255 : 8), b = 1u + ru(ru(2) ? 255 : 8);
+        inks[0].measured = (epi_rgb_t){(uint8_t)r, (uint8_t)g, (uint8_t)b};
+        for (size_t i = 1; i < n; i++) {
+            inks[i].measured = (epi_rgb_t){(uint8_t)ru(r + 1u), (uint8_t)ru(g + 1u), (uint8_t)ru(b + 1u)};
+        }
+        return n;
+    }
+    case 3: {
+        const uint32_t range = 1u << (1 + ru(8));
+        for (size_t i = 0; i < n; i++) {
+            inks[i].measured = (epi_rgb_t){(uint8_t)ru(range), (uint8_t)ru(range), (uint8_t)ru(range)};
+        }
+        return n;
+    }
+    default:
+        for (size_t i = 0; i < n; i++) {
+            inks[i].measured = (epi_rgb_t){(uint8_t)rnd(), (uint8_t)rnd(), (uint8_t)rnd()};
+        }
+        return n;
+    }
+}
+
+/* rand_inks_any, with the darkest ink set to exactly (0, 0, 0) in every eighth
+ * set. The choice counts calls rather than drawing, so the other sets are the
+ * ones rand_inks_any alone would give. */
+static size_t rand_inks(epi_ink_t* inks) {
+    static unsigned calls;
+    const size_t n = rand_inks_any(inks);
+    if (calls++ % 8 == 7) {
+        size_t dark = 0;
+        unsigned best = ~0u;
+        for (size_t i = 0; i < n; i++) {
+            const unsigned l = 2126u * inks[i].measured.r + 7152u * inks[i].measured.g + 722u * inks[i].measured.b;
+            if (l < best) {
+                best = l;
+                dark = i;
+            }
+        }
+        inks[dark].measured = (epi_rgb_t){0, 0, 0};
+    }
+    return n;
+}
+
+/* Checks what the progress callback is promised: done rises by 1 from 1, total is
+ * constant, the ctx is the one given; returns false at cancel_at (0: never). */
+typedef struct {
+    unsigned calls;
+    unsigned total;
+    unsigned cancel_at;
+    bool bad;
+} progress_check_t;
+
+static bool check_progress(void* ctx, unsigned done, unsigned total) {
+    progress_check_t* pc = ctx;
+    pc->bad = pc->bad || done != pc->calls + 1 || total == 0 || done > total || (pc->calls != 0 && total != pc->total);
+    pc->total = total;
+    pc->calls++;
+    return done != pc->cancel_at;
+}
+
+static void fuzz_colour(int iters) {
+    static const float sig[] = {FLT_TRUE_MIN, 0.01f, 0.3f, 1.f, 6.f, 10.5f};
+    long ok = 0, rejected = 0, cancelled = 0, rows = 0, zero_black = 0;
+    for (int it = 0; it < iters; it++) {
+        epi_ink_t inks[16];
+        epi_colour_panel_config_t g;
+        memset(&g, 0, sizeof g);
+        g.name = "c";
+        g.width = 100;
+        g.height = 100;
+        g.inks = inks;
+        g.ink_count = rand_inks(inks);
+        g.detail_sigma = sig[ru(6)];
+        progress_check_t pc = {0};
+        g.progress = check_progress;
+        g.progress_ctx = &pc;
+        const size_t need = epi_colour_panel_size(&g);
+        CHECK(need != 0, "a valid structure got size 0 [seed=%llu iteration=%d]", (unsigned long long)seed_arg, it);
+        unsigned mis = ru(32);
+        uint8_t* store = malloc(need + mis);
+        CHECK(store != NULL, "out of memory");
+        const epi_panel_t* p = NULL;
+        const char* why = "stale";
+        CHECK(
+            epi_colour_panel_init(&g, store + mis, need - 1, &p, &why) == EPI_ERR_WORKSPACE_TOO_SMALL && p == NULL &&
+                why == NULL,
+            "init accepted storage one byte short"
+        );
+        CHECK(pc.calls == 0, "init reported progress with storage one byte short");
+        /* Every third iteration first cancels an init, so that the real one reuses the
+         * storage. The cancel point comes from the iteration, not the RNG, so the inks
+         * and conversions drawn are the same as without it. */
+        if (it % 3 == 0) {
+            pc.cancel_at = 1 + (unsigned)it * 97u % 360u;
+            const epi_err_t c = epi_colour_panel_init(&g, store + mis, need, &p, &why);
+            CHECK(!pc.bad, "progress callback saw a wrong done, total or ctx");
+            CHECK(
+                c == EPI_ERR_CANCELLED ? pc.calls == pc.cancel_at && p == NULL && why == NULL
+                                       : c == EPI_ERR_INVALID_ARG && pc.calls < pc.cancel_at,
+                "cancel at %u gave %s after %u calls",
+                pc.cancel_at,
+                epi_strerror(c),
+                pc.calls
+            );
+            cancelled += c == EPI_ERR_CANCELLED;
+            pc = (progress_check_t){0};
+        }
+        const epi_err_t e = epi_colour_panel_init(&g, store + mis, need, &p, &why);
+        CHECK(!pc.bad, "progress callback saw a wrong done, total or ctx");
+        if (e != EPI_OK) {
+            CHECK(
+                e == EPI_ERR_INVALID_ARG && p == NULL && why != NULL && why[0] != '\0',
+                "rejected inks: %s",
+                epi_strerror(e)
+            );
+            free(store);
+            rejected++;
+            continue;
+        }
+        CHECK(pc.calls != 0 && pc.calls == pc.total, "built a panel without all of the progress");
+        CHECK(why == NULL, "a built panel left a reason");
+        ok++;
+        for (size_t i = 0; i < g.ink_count; i++) {
+            zero_black += inks[i].measured.r == 0 && inks[i].measured.g == 0 && inks[i].measured.b == 0;
+        }
+        for (int conv = 0; conv < 3; conv++) {
+            epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f};
+            if (ru(2) == 0) {
+                in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4)};
+            }
+            epi_config_t c = {p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(64)), (uint16_t)(1 + ru(40))};
+            size_t cneed = epi_converter_workspace_size(&c);
+            CHECK(
+                cneed != 0,
+                "the converter refused an accepted panel [seed=%llu iteration=%d]",
+                (unsigned long long)seed_arg,
+                it
+            );
+            uint8_t* raw = malloc(cneed);
+            uint8_t* out = malloc(c.width);
+            epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
+            CHECK(raw != NULL && out != NULL && row != NULL, "out of memory");
+            epi_converter_t* cv = NULL;
+            CHECK(epi_converter_init(&c, raw, cneed, &cv) == EPI_OK, "converter init failed on an accepted panel");
+            int mode = (int)ru(8);
+            uint32_t got = 0;
+            for (uint32_t y = 0; y < c.height; y++) {
+                if (ru(4) == 0) {
+                    mode = (int)ru(8);
+                }
+                fill(row, c.width, mode, y);
+                CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
+                while (epi_converter_pop(cv, out) == EPI_OK) {
+                    got++;
+                    rows++;
+                    for (uint32_t x = 0; x < c.width; x++) {
+                        size_t i = 0;
+                        while (i < p->ink_count && p->inks[i].code != out[x]) {
+                            i++;
+                        }
+                        CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
+                    }
+                }
+            }
+            CHECK(got == c.height, "converter emitted %u rows, want %u", (unsigned)got, (unsigned)c.height);
+            free(row);
+            free(out);
+            free(raw);
+        }
+        free(store);
+    }
+    printf(
+        "colour: accepted=%ld rejected=%ld cancelled=%ld rows=%ld zero-black=%ld\n",
+        ok,
+        rejected,
+        cancelled,
+        rows,
+        zero_black
+    );
+}
+
 int main(int argc, char** argv) {
     int n = argc > 1 ? atoi(argv[1]) : 3000;
     if (argc > 2) {
@@ -693,5 +939,6 @@ int main(int argc, char** argv) {
     fuzz_converter(n / 3);
     fuzz_preview(n / 3);
     fuzz_pack(n / 3);
+    fuzz_colour(argc > 3 ? atoi(argv[3]) : n / 100);
     return 0;
 }

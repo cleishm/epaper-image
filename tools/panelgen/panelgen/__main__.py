@@ -72,12 +72,9 @@ def main(argv=None) -> int:
                       f"thr {g.level_thr}, darkest L* {g.lstar_min_q8 / 256:.2f}, "
                       f"kernel r {(len(g.kernel) - 1) // 2}")
         elif t is not None:
-            d, I = t.diag, t.ints
-            nz = [v for v in d["hull_nudges"] if v]
-            print(f"  {t.panel.name}: {I['hull_face_count']} faces, d nudged on {len(nz)} "
-                  f"(max {max(d['hull_nudges'])} Q32 LSB); L* {I['lstar_min']}..{I['lstar_max']} Q8; "
-                  f"kernel r {I['kernel_radius']}, centre {I['kernel'][I['kernel_radius']]}, "
-                  f"residual {d['kernel_residual']:+d}; white OKLab Q16 path err {d['white_oklab_lsb_err']} LSB")
+            I = t.ints
+            print(f"  {t.panel.name}: {I['hull_face_count']} faces; L* {I['lstar_min']}..{I['lstar_max']} Q8; "
+                  f"kernel r {I['kernel_radius']}, centre {I['kernel'][I['kernel_radius']]}")
     if a.check:
         if stale:
             print("stale: " + ", ".join(stale), file=sys.stderr)

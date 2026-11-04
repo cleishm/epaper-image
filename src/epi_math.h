@@ -1,11 +1,12 @@
 /*
  * Internal fixed-point maths primitives (docs/design.md, "Fixed-point arithmetic and determinism").
  *
- * Every function here except epi_cbrt_d, epi_exp_d and epi_sin_d is integer-only, so
+ * Every function here except the init-time ones in double (epi_cbrt_d,
+ * epi_sqrt_d, epi_exp_d, epi_sin_d and epi_gaussian_kernel_q15) is integer-only, so
  * its output is bit-identical on every target (host, ESP32, WASM). Right
  * shifts are only ever applied to unsigned values; signed results are
  * formed by negating an unsigned magnitude, so nothing depends on
- * implementation-defined behaviour. epi_cbrt_d, epi_exp_d and epi_sin_d use only
+ * implementation-defined behaviour. The ones in double use only
  * IEEE-754 correctly-rounded double + − × ÷ and exact bit manipulation, and
  * so are deterministic as long as double arithmetic is evaluated in double
  * (FLT_EVAL_METHOD 0: x86-64 SSE, ARM, Xtensa soft-float, WASM; not 32-bit
@@ -100,18 +101,28 @@ int32_t epi_smoothstep_q16(int32_t x, int32_t lo, int32_t hi);
  * Init-time cube root in double, without libm: + − × ÷ and exact
  * exponent/bit manipulation only. Domain: +0 (returned unchanged) and
  * 2^-16 ≤ x < 2, which holds every value reaching it: level_y / 65536
- * (0 or at least 2^-16, at most 1) and lab_f_d's t (above (6/29)³, up to about
- * 1.00003 at the tone table's top slope sample). The result is unspecified
- * elsewhere. Newton iterations followed by one correction step whose
+ * (0 or at least 2^-16, at most 1), epi_lab_f_d's t (above (6/29)³, up to about
+ * 1.00003 at the tone table's top slope sample) and a colour ink's cone
+ * responses (src/epi_colour_panel.c rejects inks outside it). The result is
+ * unspecified elsewhere. Newton iterations followed by one correction step whose
  * residual is computed exactly (Dekker two-product), so the result is the
  * correctly rounded cube root except possibly in near-halfway cases.
  */
 double epi_cbrt_d(double x);
 
 /*
+ * Init-time square root in double, without libm, under the same rules as
+ * epi_cbrt_d. Domain: +0 (returned unchanged) and positive normal x; the result
+ * is unspecified elsewhere. Newton iterations followed by one correction step
+ * whose residual is computed exactly (Dekker two-product), so the result is
+ * within 1 ulp and correctly rounded except possibly in near-halfway cases.
+ */
+double epi_sqrt_d(double x);
+
+/*
  * Init-time exp in double, without libm, under the same rules as
  * epi_cbrt_d (+ − × ÷ and exact power-of-two scaling only). Domain: finite
- * x ≤ 0, −0 included (gaussian_kernel's −i²/2σ²); undefined elsewhere. ≤ 1 ulp
+ * x ≤ 0, −0 included (epi_gaussian_kernel_q15's −i²/2σ²); undefined elsewhere. ≤ 1 ulp
  * from the exact value wherever the result is normal; x < −746 gives +0
  * (results in the subnormal range are rounded twice, still within 1
  * subnormal ulp).
@@ -126,6 +137,14 @@ double epi_exp_d(double x);
  * the domain (or for NaN / ±inf) the result is NaN.
  */
 double epi_sin_d(double x);
+
+/*
+ * Init-time Gaussian detail kernel for sigma in (0, 10.5]: exp(−i²/2σ²),
+ * i = −r..r, r = ⌈3σ⌉ ≤ 32, normalised and rounded to Q15 (half away from zero),
+ * with the centre tap absorbing the residual so the sum is exactly 2^15. Writes
+ * the 2r + 1 taps and returns r.
+ */
+int epi_gaussian_kernel_q15(float sigma, uint16_t* taps);
 
 /* p rounded up to a multiple of a. */
 static inline void* epi_align_ptr(void* p, size_t a) {

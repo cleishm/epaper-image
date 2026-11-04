@@ -326,8 +326,8 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
   It has ESP-IDF firmware that receives a frame over USB serial, and `send.py`,
   which sends it. See [tools/panel/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panel/README.md) for the
   supported boards.
-- `tools/panelgen` generates the tables for colour panels and for grey
-  panels shipped as const calibrations. See
+- `tools/panelgen` generates the tables for colour and grey panels shipped as
+  const calibrations. See
   [tools/panelgen/README.md](https://github.com/cleishm/epaper-image/blob/main/tools/panelgen/README.md).
 
 ## Building and testing

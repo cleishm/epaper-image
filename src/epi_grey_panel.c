@@ -70,36 +70,6 @@ static bool derive_levels(const epi_grey_panel_config_t* cfg, int32_t level_y[EP
     return epi_midtone_monotone(epi_grey_lstar_q8(level_y[0]));
 }
 
-/* Sampled Gaussian exp(−i²/2σ²), i = −r..r, r = ⌈3σ⌉, normalised and
- * rounded to Q15 (half away from zero), with the centre tap absorbing the
- * residual so the sum is exactly 2^15: tools/panelgen's kernel_q15, in the
- * same double operations (the sum is sequential; for every σ = k/100 in
- * (0, 10.5] as a float this reproduces panelgen's taps exactly). */
-static void gaussian_kernel(float sigma_f, epi_panel_tables_t* t) {
-    const double sigma = sigma_f;
-    const double r3 = 3.0 * sigma; /* exact: a float times 3 fits a double */
-    int r = (int)r3;
-    if ((double)r < r3) {
-        r++;
-    }
-    double w[2 * EPI_MAX_KERNEL_RADIUS + 1];
-    const double den = 2.0 * sigma * sigma;
-    double sum = 0.0;
-    for (int i = -r; i <= r; i++) {
-        double di = (double)i;
-        w[i + r] = epi_exp_d(-(di * di) / den);
-        sum += w[i + r];
-    }
-    int32_t total = 0;
-    for (int j = 0; j <= 2 * r; j++) {
-        int32_t tap = (int32_t)((w[j] / sum) * 32768.0 + 0.5);
-        t->kernel[j] = (uint16_t)tap;
-        total += tap;
-    }
-    t->kernel[r] = (uint16_t)(t->kernel[r] + (32768 - total));
-    t->kernel_radius = (uint8_t)r;
-}
-
 size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg) {
     int32_t level_y[EPI_MAX_INKS];
     if (!derive_levels(cfg, level_y)) {
@@ -131,7 +101,7 @@ epi_err_t epi_grey_panel_init(const epi_grey_panel_config_t* cfg, void* storage,
     epi_grey_tables_t* t = &s->tables;
     t->base.kind = EPI_PANEL_GREY;
     t->base.ink_count = (uint8_t)n;
-    gaussian_kernel(cfg->detail_sigma, &t->base);
+    t->base.kernel_radius = (uint8_t)epi_gaussian_kernel_q15(cfg->detail_sigma, t->base.kernel);
     for (size_t i = 0; i < n; i++) {
         t->level_y[i] = level_y[i];
     }

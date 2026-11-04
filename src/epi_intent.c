@@ -118,7 +118,7 @@ static inline int32_t adapt_degree(const epi_intent_ctx_t* ctx, int32_t lsrc_q8)
 }
 
 /* Panel CIELAB Q8: panel = M_bpc·lin + D·(M_adapt·lin − M_bpc·lin) + B,
- * in Q32 (panelgen makes M_adapt's rows sum to W − B, so source white lands
+ * in Q32 (M_adapt's rows are made to sum to W − B, so source white lands
  * exactly on the white ink); ratio to the white ink by the init-time
  * reciprocal (no division). */
 static inline void panel_lab(const epi_intent_ctx_t* ctx, const int32_t lin[3], int32_t d_q16, int32_t lab[3]) {
@@ -266,10 +266,11 @@ static void cusp_move(const epi_colour_tables_t* t, const int32_t lab[3], int32_
     int32_t c0 = t->cusp_lstar[hi], c1 = t->cusp_lstar[hi == 359 ? 0 : hi + 1];
     int64_t lc = ((int64_t)c0 << 8) + (int64_t)(c1 - c0) * hf;
     int64_t ld = l - lc;
-    /* panelgen keeps every cusp at least 0.5 L* inside the neutral interval, so
-     * k ≥ 2^16 and nothing below overflows, whatever a and b (the bound is
-     * derived in tools/panelgen/panelgen/gen.py, CUSP_MARGIN_Q8). The tables
-     * only come from panelgen; a corrupted one may misbehave here. */
+    /* epi_colour_tables_derive, which panelgen runs for a const panel too, keeps
+     * every cusp at least 0.5 L* inside the neutral interval, so k ≥ 2^16 and nothing
+     * below overflows, whatever a and b (the bound is derived in
+     * src/epi_panel_tables.h, EPI_CUSP_MARGIN_Q8). A corrupted table may misbehave
+     * here. */
     int64_t k = 2 * (ld > 0 ? lmax - lc : lc - lmin);
     int64_t ald = ld < 0 ? -ld : ld;
     uint64_t num = (uint64_t)c * (uint64_t)span, den = (uint64_t)(20 * k);
@@ -323,11 +324,11 @@ static void cusp_move(const epi_colour_tables_t* t, const int32_t lab[3], int32_
 
 #define D_DELTA (6.0 / 29.0)
 
-static double lab_f_d(double t) {
+double epi_lab_f_d(double t) {
     return t > D_DELTA * D_DELTA * D_DELTA ? epi_cbrt_d(t) : t / (3.0 * D_DELTA * D_DELTA) + 4.0 / 29.0;
 }
 
-static double lab_finv_d(double f) {
+double epi_lab_finv_d(double f) {
     return f > D_DELTA ? f * f * f : 3.0 * D_DELTA * D_DELTA * (f - 4.0 / 29.0);
 }
 
@@ -352,8 +353,8 @@ static double midtone_knee(double lmin) {
 
 /* T0(L) = L*(Y(L)·(W_y − B_y) + B_y; white W_y). */
 static double bpc_lightness(const tone_params_t* p, double l) {
-    double y = lab_finv_d((l + 16.0) / 116.0);
-    return 116.0 * lab_f_d((y * (p->wy - p->by) + p->by) / p->wy) - 16.0;
+    double y = epi_lab_finv_d((l + 16.0) / 116.0);
+    return 116.0 * epi_lab_f_d((y * (p->wy - p->by) + p->by) / p->wy) - 16.0;
 }
 
 /* Midtone curve, with τ clipped to [0, 1]; knee K as
@@ -384,7 +385,7 @@ static int in_range(float v, float lo, float hi) {
 }
 
 int32_t epi_grey_lstar_q8(int32_t y_q16) {
-    return round_d((116.0 * lab_f_d(y_q16 / 65536.0) - 16.0) * 256.0);
+    return round_d((116.0 * epi_lab_f_d(y_q16 / 65536.0) - 16.0) * 256.0);
 }
 
 int epi_midtone_monotone(int32_t lstar_min_q8) {

@@ -231,7 +231,7 @@ def derive_grey(panel: GreyPanel, mode: str, entry: dict) -> GreyTables:
         thr.append(q)
 
     kern = kernel_c(sigma)
-    if kern != kernel_q15(sigma)[0]:
+    if kern != kernel_q15(sigma):
         raise AssertionError(f"sigma {sigma}: C kernel rule differs from panelgen kernel_q15")
     r = (len(kern) - 1) // 2
     assert r <= MAX_KERNEL_RADIUS and sum(kern) == 32768 and kern == kern[::-1]

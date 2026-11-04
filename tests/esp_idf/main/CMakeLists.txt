@@ -9,6 +9,7 @@ idf_component_register(
          "${T}/test_intent.c"
          "${T}/test_converter.c"
          "${T}/test_grey.c"
+         "${T}/test_colour_panel.c"
          "${T}/test_resampler.c"
          "${T}/test_preview.c"
     PRIV_INCLUDE_DIRS "${T}" "${T}/../src"

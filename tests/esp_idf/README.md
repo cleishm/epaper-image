@@ -16,13 +16,14 @@ Differences from the host build:
   ignored (their death-test branches need fork, and their NDEBUG branches need
   a release build of the library).
 - `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`), full newlib printf, 64-bit
-  Unity assertions, no task watchdog, 64 KB main task stack.
+  Unity assertions, no task watchdog, 32 KB main task stack.
 
-Expect the same output as the host for every determinism check: the eight
-`fingerprint <name> 0x...` lines (test_math), the `intent fingerprint` line,
+Expect the same output as the host for every determinism check: the nine
+`fingerprint <name> 0x...` lines (test_math), the `fingerprint colour tables` line
+(test_colour_panel), the `intent fingerprint` line,
 and PASS for `test_converter_goldens`, `test_grey_goldens` and
 `test_resampler_goldens` (these print hashes only on mismatch). The
-`differs from libm` / `differ` counts in the cbrt_d, exp_d and sin tests
+`differs from libm` / `differ` counts in the cbrt_d, sqrt_d, exp_d and sin tests
 compare against the target's own libm, so they may differ from the host, and
 that is fine.
 

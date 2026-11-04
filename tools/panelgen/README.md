@@ -1,21 +1,22 @@
 # panelgen
 
 panelgen generates the C library's constant tables (docs/design.md, "Panel
-tables"). The colour maths is in `panelgen/colour.py` (sRGB, XYZ, Lab,
-Bradford), `panelgen/palette.py` (the ink tables), `panelgen/gamut.py`
-(`InkGamut`: the ink hull, Bradford/BPC) and `panelgen/model.py` (the
-ink-relative OKLab, `cusp_lut` and `panel_partial`), and in `panelgen/grey.py`
-for grey calibrations. `panelgen/gen.py` only folds matrices, quantises and
-writes C.
+tables"). Colour panels come from the library's own derivation:
+`panelgen/gen.py` compiles `colour_tables.c` with `src/epi_colour_panel.c` and the
+sources it links, runs it on the panel's inks and σ, and renders the integers it
+prints as C. `panelgen/grey.py` computes and renders grey calibrations, and
+`panelgen/colour.py` holds the sRGB constants behind `src/epi_srgb.c`.
 
-Set up this tool's venv first, from `tools/panelgen` (numpy, scipy, pytest; see
+Set up this tool's venv first, from `tools/panelgen` (only pytest; see
 `requirements.txt`):
 `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+Generating a colour panel also needs a C compiler that takes `cc`'s flags: `$CC`,
+or else `cc`.
 
 ```sh
 cd tools/panelgen && .venv/bin/python -m panelgen          # write
 cd tools/panelgen && .venv/bin/python -m panelgen --check  # regenerate and diff; exit 1 if stale
-cd tools/panelgen && .venv/bin/python -m pytest -q         # self-checks
+cd tools/panelgen && .venv/bin/python -m pytest -q         # tests
 ```
 
 It writes:
@@ -35,40 +36,30 @@ size, σ and the presets. The measured inks come from the ink table it
 names (`panelgen/palette.py`).
 
 Each generated file starts with the command above and a SHA-256 of the
-generator's inputs: the ink table, the panel definition, the model
-constants and the quantisation rules. The output is deterministic on one
-platform, so to test reproducibility you regenerate and diff (`--check`). The
-pytest suite also regenerates the files twice into temporary trees and compares
-them byte for byte.
+generator's inputs. For a colour panel those are the panel definition, the ink
+table and a format version. The output is deterministic, so to test
+reproducibility you regenerate and diff (`--check`), which also catches a change
+in the library's derivation. The pytest suite also regenerates the files twice
+into temporary trees and compares them byte for byte.
 
-Across platforms the floating-point results differ slightly: on Linux and
-Windows, 1 to 4 of EL133UF1's 360 `cusp_lstar` entries move by 1 (Q8, about
-0.004 L\*), because `cusp_lut` takes a maximum along a nearly flat ridge. On
-Windows the grey panel's header also differs (path separators, and the JSON's
-hash after a CRLF checkout). The shipped tables were generated on macOS arm64,
-and CI runs `--check` there. Regenerate on macOS, because committing the output
-from another platform changes the bits sent to the panel.
+A colour panel's tables are the same on every platform, because the C determines
+them, and nothing in a colour panel's header depends on line endings. On Windows
+only a grey panel's header differs: a CRLF checkout changes the hash of its JSON,
+and it has different path separators.
 
-Every generation runs these self-checks (`gen.check`):
+Generation stops with the panel and the reason, and exits with status 2, if:
 
-- In double, `lin_to_panel_adapt·lin + B` reproduces `gamut.to_panel`, and
-  the D blend reproduces `model.panel_partial`, both for scalar D and for
-  per-pixel D.
-- The folded OKLab matrices reproduce `Inks.to_space(…, "oklab")`.
-- Every ink is inside the Q16 hull, tested in exact integer arithmetic.
-  Random ink mixtures are inside too.
-- The white ink maps to OKLab (1, 0, 0) through the Q16 tables, simulated
-  in integers.
-- The kernel is symmetric and sums to exactly 2^15.
-- Every value fits its C type.
-- L\*min has a monotone midtone knee, and every cusp is at least 0.5 L\* inside
-  the neutral range (`gen.CUSP_MARGIN_Q8` derives the margin).
-- The tables pass every check `epi_converter_init` makes of them
-  (`gen.check_tables_valid`), and the presets every check `epi_intent_init`
-  makes of them (`gen.check_presets`).
+- `epi_colour_panel_init` refuses the inks, their nominal colours, the ink count or
+  σ (docs/design.md, "Colour panels from inks").
+- A preset fails a check `epi_intent_init` makes of it (`gen.check_presets`), or
+  there are no presets.
+- No C compiler is found, or the compiler can't be run or fails to compile
+  `colour_tables.c`.
 
-The last two depend on the panel's inks, σ and presets: generation prints the
-panel and the reason, and exits with status 2.
+Any other failure, such as the compiled `colour_tables` crashing, is a bug in the
+generator and ends in a traceback. The tables' properties are tested with the
+library: `test_colour_panel_el133uf1` (`tests/test_colour_panel.c`) requires every
+field of the generated panel to equal what `epi_colour_panel_init` builds.
 
 ## Grey calibrations
 

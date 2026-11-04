@@ -14,6 +14,7 @@ void test_strerror(void) {
         {EPI_ERR_NOT_DRAINED, "earlier rows not drained"},
         {EPI_ERR_FINISHED, "all rows already processed"},
         {EPI_ERR_SOURCE_TOO_LARGE, "source too large"},
+        {EPI_ERR_CANCELLED, "cancelled"},
         {(epi_err_t)-1, "unknown error"},
         {(epi_err_t)1000, "unknown error"},
     };

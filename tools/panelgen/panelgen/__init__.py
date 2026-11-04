@@ -1,9 +1,9 @@
 """panelgen: generate the C library's constant panel tables.
 
-The colour maths: colour.py (sRGB, XYZ, Lab, Bradford), palette.py (the ink
-tables), gamut.py (the ink hull, Bradford/BPC) and model.py (OKLab, the cusp
-table, partial adaptation). gen.py and grey.py only quantise and write C.
-See README.md.
+palette.py holds the ink tables and panels.py the panel definitions. gen.py
+renders colour panels from the library's own derivation (colour_tables.c, in
+this tool's directory), and the sRGB tables from colour.py; grey.py computes
+and renders grey calibrations. See README.md.
 """
 
 from __future__ import annotations

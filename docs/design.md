@@ -68,7 +68,8 @@ push and pop.
 ### Measured inks
 
 A panel is described by its inks (`epi_ink_t`): the `code` sent to the panel,
-a `nominal` sRGB8 colour used only for nominal previews, and a `measured`
+a `nominal` sRGB8 colour (for nominal previews, and for a colour panel's init to
+check which ink is white), and a `measured`
 sRGB8 colour, which is what the panel actually shows. Everything the library
 computes is driven by the measured colours: the gamut, the matching, the
 diffused error and the measured preview. The EL133UF1's inks, in matching
@@ -186,8 +187,8 @@ M_bpc   = (W_y − B_y) · M_srgb
 
 Both matrices are folded with the sRGB matrix so they act on linear sRGB
 directly (`lin_to_panel_adapt`, `lin_to_panel_bpc`). At D = 1 source white
-lands exactly on the white ink; panelgen adjusts each quantised row of
-`lin_to_panel_adapt` so that its sum is exactly W − B, which keeps this true
+lands exactly on the white ink; each quantised row of
+`lin_to_panel_adapt` is adjusted so that its sum is exactly W − B, which keeps this true
 in Q16 (otherwise rounding could put source white one LSB outside the
 hull's white vertex). At D = 0 source white has the white ink's Y and D65's
 chromaticity apart from the black ink's offset. How D is chosen per pixel is
@@ -220,10 +221,11 @@ A grey panel's struct holds instead each level's Y relative to the lightest
 Q16). On a 64-bit host the colour tables are 2,112 B and the grey tables 260 B.
 A panel has at most 16 inks and a kernel radius of at most 32.
 
-Colour tables are generated offline by `tools/panelgen` and committed as C
-source (`src/panels/<panel>.c`); see [Panel tables](#panel-tables). Grey
-tables can be generated the same way or built at runtime by
-`epi_grey_panel_init`; see [Grey panels](#grey-panels).
+Both kinds of table can be generated offline by `tools/panelgen` and committed
+as C source (`src/panels/<panel>.c`), see [Panel tables](#panel-tables), or built
+at runtime: colour by `epi_colour_panel_init`, see
+[Colour panels from inks](#colour-panels-from-inks), and grey by
+`epi_grey_panel_init`, see [Grey panels](#grey-panels).
 
 ## Rendering intent
 
@@ -464,12 +466,12 @@ that end's verdict, and the face that rejected the previous probe is tested
 first.
 
 The cusp table holds, for each integer hue, the L\* of the maximum in-hull
-chroma; it is generated offline (see [Panel tables](#panel-tables)).
+chroma (see [Colour panels from inks](#colour-panels-from-inks)).
 `lab_to_xyz` clamps L\* to ±256 and a\*, b\* to ±512 only so the products
-fit int32; no meaningful colour reaches those bounds. panelgen keeps every cusp
+fit int32; no meaningful colour reaches those bounds. A colour panel has each cusp
 at least 0.5 L\* inside the neutral interval, which keeps k above zero and the
-anchor's arithmetic in int64 for any a\* and b\* the pipeline can produce, so
-the move has no guard for a table that breaks this.
+anchor's arithmetic in int64 for any a\* and b\* the pipeline can produce, so the
+move has no guard for a table that breaks this.
 
 ### S6: target
 
@@ -755,6 +757,96 @@ same config gives the same panel, bit for bit, on every target. Every grey
 panel, runtime or generated, shares one set of presets, `epi_grey_presets`:
 the Default, Soft and Deep of [Presets](#presets).
 
+## Colour panels from inks
+
+`epi_colour_panel_init` builds a colour panel at runtime from measured inks, in
+caller storage of `epi_colour_panel_size` bytes (any alignment; the size includes
+the slack), which is 2,295 B on a 64-bit host. The storage holds the
+`epi_panel_t`, its tables and a copy of the inks; the name is kept by pointer.
+The panel's presets are `epi_colour_presets`: the four of [Presets](#presets),
+EL133UF1's values, shared by every runtime colour panel.
+
+The derivation is in `src/epi_colour_panel.c`, in double, under the rules of
+[Init-time floating point](#init-time-floating-point), and `tools/panelgen` runs
+the same code for a built-in panel ([Panel tables](#panel-tables)). Quantisation
+is q(x, n) = sign(x)·⌊|x|·2^n + 0.5⌋ throughout.
+
+- **Inks.** Each measured sRGB8 value goes through the EOTF to linear sRGB, then
+  through the 4-decimal matrix to XYZ. x^2.4 is x²·(x²)^(1/5), with the fifth root
+  by Newton from 1, which falls monotonically until rounding stops it. W and B are
+  the first inks of largest and smallest Y.
+- **Hull.** Every triple of inks, in lexicographic order, whose plane has all the
+  inks on one side is a face, oriented so that the inside is n·x + d ≤ 0 with n a
+  unit vector. A point within 1e-11 of a plane counts as on it, and faces within
+  1e-9 of each other merge, so that coplanar inks make one face: a cube of 8 inks
+  has 6 faces. This order is the face order of the tables. Normals round to Q16
+  and offsets to Q32, then each offset is lowered until every ink, in Q16, tests
+  inside in exact integer arithmetic. Without this an ink could test outside its
+  own hull and be moved by S5.
+- **Matrices.** The Bradford matrix A (D65 to W/W_y), the black-point scale k,
+  `lin_to_panel_adapt` = diag(k)·A·M_srgb with its rows adjusted so each sums
+  exactly to W − B in Q16, `lin_to_panel_bpc` = (W_y − B_y)·M_srgb,
+  `xyz_to_lin` = M_srgb⁻¹, `lin_to_lms` = M1·diag(1/w) and `lms_to_oklab` = M2.
+  The two constant inverses are taken by the adjugate.
+- **Inks and n̂.** Each ink's linear sRGB, direct rather than from XYZ so that a
+  zero channel stays exactly zero, and its ink-relative OKLab (the white ink is
+  exactly (1, 0, 0)), and n̂ = w/|w|.
+- **Neutral interval.** The segment of the ray Y·W/W_y inside the hull, shrunk by
+  1e-9 in Y so that the end points test inside. Because the black ink need not be
+  exactly neutral relative to the white ink, L\*min can sit slightly above the
+  black ink's L\*. A face through the origin and W holds the ray in its plane (a
+  neutral black and white can make one), where k and d in k·Y + d ≤ 0 are both
+  rounding noise; a face with |k| at most 1e-11 therefore bounds nothing.
+- **Cusp table.** For each integer hue 0..359, the L\* of maximum in-hull chroma,
+  the first maximum winning. The in-hull chroma at a given (L\*, h) comes from a
+  probe at chroma 200, bisected at constant L\* and hue for 20 steps with a
+  containment tolerance of 1e-7 in XYZ. The search samples 64 L\* values over the
+  neutral interval, then runs 4 refinement passes of 17 samples spanning the best
+  sample's neighbours, each narrowing the step by a factor of 8 (from about 1 L\*
+  to about 2.5·10^-4). That is 950,400 in-gamut tests in double, the slow part, above
+  all on a target with no double-precision FPU, so the inner loop tests the face
+  that rejected the last point first, as S5 does, and evaluates Y once per L\*.
+- **Kernel.** The Q15 Gaussian of [S2](#s2-base) for the panel's σ, from
+  `epi_gaussian_kernel_q15`, shared with grey panels.
+
+The optional progress callback of `epi_colour_panel_config_t` is called after each
+hue of the cusp search and sees no tables, so it can't affect the panel's determinism;
+if it returns false, init returns `EPI_ERR_CANCELLED`.
+
+Inks that can't make a panel return `EPI_ERR_INVALID_ARG` with a reason, which
+`epi_colour_panel_init` passes on from the internal `epi_colour_tables_derive`. The
+conditions, in order, keep the double arithmetic in its domains and the converter's
+integer arithmetic in range:
+
+- The inks span three dimensions and at most 32 faces.
+- W's nominal Y is the largest of the inks' nominal Y. Zero or equal nominals pass.
+  W is the lightest measured ink, so a pale ink measured lighter than the real white
+  would otherwise take its place, and source white would render in that ink.
+- W's X, Y and Z are above 512 in Q16, so that W's reciprocal fits int32; B's Y is
+  below W's in Q16.
+- W has no zero channel: `lin_to_lms` divides by each.
+- Every cone response relative to W is in the domain of `epi_cbrt_d`: 0, or in
+  [2^-16, 2).
+- Every entry of `lin_to_panel_adapt` fits Q16. A white ink far from neutral with a
+  black ink far above it in X or Z is the only way out of that range.
+- The ray enters the hull; L\*min is at least 0 and has a monotone midtone knee
+  (`epi_midtone_monotone`); L\*max is at most 100; and the interval is at least
+  twice the cusp margin.
+- The probe is outside the hull: if a bisection never moves its upper end, the
+  chroma search has no answer.
+- Every cusp is at least 0.5 L\* inside the neutral interval, a margin derived in
+  `src/epi_panel_tables.h` from the cusp move's arithmetic ([S5](#s5-gamut-mapping)).
+  The search exits at the first hue that fails.
+
+Four inks never pass. With white and black at two vertices of a tetrahedron,
+either the axis has inks on one side only, so the hues on the other have no chroma
+to peak, or the black ink is one of the three around the axis, so the hues towards
+it peak below L\*min. The config therefore needs at least five: white, black and
+three colours around the axis.
+
+Init allocates nothing, and its stack holds the doubles of 16 inks and 32 faces.
+A build that only uses const panels doesn't link this file.
+
 ## Resampling
 
 The resampler (`src/epi_resampler.c`) resizes 8-bit sRGB by separable
@@ -916,24 +1008,28 @@ constants (the CIELAB inverse, which uses exact rational constants such as
 
 ### Init-time floating point
 
-The tables that depend on the intent or on a runtime grey panel are built in
-double at init: the tone and gain tables, the grey thresholds and L\*min,
-the grey Gaussian kernel and the resampler's horizontal coefficients. The
+The tables that depend on the intent or on a runtime panel are built in
+double at init: the tone and gain tables, the colour tables of
+[Colour panels from inks](#colour-panels-from-inks), the grey thresholds and
+L\*min, the Gaussian kernel and the resampler's horizontal coefficients. The
 resampler's vertical coefficients are computed the same way, once per output
 row as it is popped. This code uses
 only + − × ÷, integer arithmetic and exact bit manipulation, which IEEE 754
 rounds identically on every conforming target. The transcendental
 functions it needs are the library's own, never libm's:
 
-- `epi_cbrt_d`, for +0 and 2^-16 ≤ x < 2 (level Y and the CIELAB ratio): exact
-  exponent decomposition, six Newton steps and one correction step whose
-  residual is computed exactly (Dekker two-product), correctly rounded except
-  possibly in near-halfway cases;
+- `epi_cbrt_d`, for +0 and 2^-16 ≤ x < 2 (level Y, the CIELAB ratio and a colour
+  ink's cone responses): exact exponent decomposition, six Newton steps and one
+  correction step whose residual is computed exactly (Dekker two-product),
+  correctly rounded except possibly in near-halfway cases;
+- `epi_sqrt_d`, for +0 and positive normal x (a hull face's normal and n̂): the same
+  shape with four Newton steps, within 1 ulp;
 - `epi_exp_d`, for finite x ≤ 0 (the Gaussian kernel's −i²/2σ², which reaches
   −0 at the centre tap and passes the −746 underflow to +0 for σ below about
   0.026): Cody–Waite reduction by ln 2 and a degree-13 Taylor polynomial,
   within 1 ulp where the result is normal;
-- `epi_sin_d` (resampler): fdlibm's medium-range reduction and kernels,
+- `epi_sin_d` (resampler, and the colour panels' hue directions, with
+  cos(r) = sin(r + π/2)): fdlibm's medium-range reduction and kernels,
   within 1 ulp.
 
 Two build conditions complete this. Contraction of a·b + c into a fused
@@ -955,8 +1051,8 @@ outside CMake must pass `-ffp-contract=off` and `-DEPI_FP_CONTRACT_OFF` (GCC
 and Clang) or `/fp:precise` (MSVC), and must not use `-ffast-math` or an
 x87 floating-point mode.
 
-Panel tables are generated offline and stored as integers, so they are
-identical everywhere by construction.
+Generated panel tables are stored as integers, so they are identical everywhere
+by construction; runtime ones are by these rules.
 
 ### Regression hashes
 
@@ -966,7 +1062,8 @@ hash (FNV-1a 64) the ink codes of four synthetic 157×119 images
 tests do the same for three images on a 4-level and a 2-level test panel
 under each grey preset; the resampler tests hash the output of each
 regression case; and further fingerprints cover the maths primitives (the
-double ones over their stated domains) and the intent context. CI runs the
+double ones over their stated domains), the intent context and the tables of
+three runtime colour panels. CI runs the
 suite on a host matrix (Linux with GCC and Clang, macOS, Windows with MSVC)
 and under Node in an Emscripten build, and
 the ESP-IDF test app (`tests/esp_idf`) runs the same suite on ESP32 targets
@@ -976,80 +1073,43 @@ intentional change to the output: the failing test prints the new values.
 
 ## Panel tables
 
-`tools/panelgen` derives the constant tables from the measured inks and
-writes them as C. It writes `src/epi_srgb.c` (the panel-independent Q16
-EOTF table and sRGB matrix), one `src/panels/<panel>.c` per colour panel, and
-on request a grey glass's calibrations. The real-valued colour maths is in
-`colour.py` (sRGB, XYZ, CIELAB, Bradford), `palette.py` (the ink tables),
-`gamut.py` (the ink hull, adaptation and black-point compensation) and
-`model.py` (OKLab, the cusp table, partial adaptation); `gen.py` and
-`grey.py` fold matrices, quantise and render C.
+`tools/panelgen` writes the constant tables as C: `src/epi_srgb.c` (the
+panel-independent Q16 EOTF table and sRGB matrix), one `src/panels/<panel>.c` per
+colour panel, and on request a grey glass's calibrations. `palette.py` holds the
+ink tables and `panels.py` the panel definitions; `gen.py` and `grey.py` render C.
 
-### What panelgen derives
+### Built-in colour panels
 
-From a colour panel's measured inks:
+A built-in colour panel's tables come from the library's own derivation
+([Colour panels from inks](#colour-panels-from-inks)). panelgen compiles
+`tools/panelgen/colour_tables.c` with `src/epi_colour_panel.c` and the sources it
+links, with the library's floating-point flags, and that program runs
+`epi_colour_tables_derive` and `epi_gaussian_kernel_q15` on the panel's inks and σ.
+`gen.py` renders the integers it prints, beside the panel's own presets. Generating
+a colour panel therefore needs a C compiler, and gives the panel
+`epi_colour_panel_init` builds from the same inks and σ: `test_colour_panel_el133uf1`
+requires every table field to match, on every target the suite runs on.
 
-- **Ink XYZ and the hull.** The measured sRGB8 values go to XYZ in double;
-  the inks span three dimensions (panelgen refuses a flatter set). Qhull
-  gives the convex hull's faces as unit outward normals n and offsets d
-  (n·x + d ≤ 0 inside). W and B are the inks of largest and smallest Y.
-- **Matrices.** The Bradford matrix A (D65 to W/W_y), the black-point scale
-  k, `lin_to_panel_adapt` = diag(k)·A·M_srgb with its rows adjusted so each
-  sums exactly to W − B in Q16, `lin_to_panel_bpc` = (W_y − B_y)·M_srgb,
-  `xyz_to_lin` = M_srgb⁻¹, `lin_to_lms` = M1·diag(1/w) and
-  `lms_to_oklab` = M2.
-- **Hull faces in Q16.** Normals are rounded to Q16 and offsets to Q32, and
-  then each offset is lowered just enough that every quantised ink tests
-  inside its face in exact integer arithmetic. On the EL133UF1 all 8
-  offsets are lowered, by at most 48014 Q32 LSB. Without this an ink could
-  test outside its own hull and be moved by S5.
-- **Neutral interval.** L\*min and L\*max are the ends of the segment of the
-  white ink's neutral axis (Y·W/W_y) inside the hull, shrunk by 1e-9 in Y so
-  the end points test inside. Because the black ink need not be exactly
-  neutral relative to the white ink, L\*min can sit slightly above the
-  black ink's L\*.
-- **Cusp table.** For each integer hue 0..359, the L\* of maximum in-hull
-  chroma. The in-hull chroma at a given (L\*, h) is found by placing a probe
-  at chroma 200 (asserted outside) and bisecting its chroma at constant L\*
-  and hue, 20 steps, with a containment tolerance of 1e-7 in XYZ. The search
-  samples 64 L\* values over the neutral interval, then runs 4 refinement
-  passes of 17 samples spanning the best sample's neighbours, each pass
-  narrowing the step by a factor of 8 (from about 1 L\* to about 2.5·10^-4).
-- **Inks and n̂.** Each ink's linear sRGB and ink-relative OKLab (the white
-  ink is exactly (1, 0, 0)), and n̂ = w/|w|.
-- **Detail kernel.** The Q15 Gaussian of [S2](#s2-base) for the panel's σ.
-
-Quantisation is q(x, n) = sign(x)·⌊|x|·2^n + 0.5⌋ throughout.
-
-Every run checks the result before writing: in double, the folded matrices
-reproduce the adaptation model for scalar and per-pixel D; the folded OKLab
-reproduces the direct computation; every ink, and random ink mixtures, test
-inside the Q16 hull in integer arithmetic; the white ink maps to OKLab
-(1, 0, 0) through the Q16 tables within a few LSB; the kernel is symmetric
-and sums to 2^15; every value fits its C type; L\*min has a monotone midtone
-knee (`epi_midtone_monotone`); and every cusp is at least 0.5 L\* inside the
-neutral interval, a margin derived in `gen.py` from the cusp move's arithmetic
-([S5](#s5-gamut-mapping)). The last two fail generation with a message, since
-they depend on the inks rather than on panelgen's own correctness.
+Inks or a σ the derivation refuses, or presets `epi_intent_init` would refuse, fail
+generation with the reason, and nothing is written.
 
 ### Inputs SHA-256 and the check mode
 
 Each generated file starts with the command that produced it and an
 **Inputs SHA-256**: the SHA-256 of a canonical JSON (sorted keys, compact)
-of everything the output depends on. For a colour panel that is the panel
-definition, the ink table, the model constants (the sRGB, Bradford and
-OKLab matrices, the hull tolerance, the bisection depth and the cusp search
-constants), the quantisation rules and a format version. For a grey glass it
-is the glass definition, the SHA-256 of the levels JSON's bytes, the sRGB
-inputs and the grey rules. A changed hash in a diff therefore says that an
-input changed, not just the output.
+of the generator's inputs. For a colour panel that is the panel definition, the
+ink table and a format version.
+For a grey glass it is the glass definition, the SHA-256 of the levels JSON's
+bytes, the sRGB inputs and the grey rules. A changed hash in a diff therefore says
+that an input changed, not just the output.
 
-Generation is deterministic on one platform, so `python -m panelgen --check`
-regenerates in memory and compares byte for byte with the committed files,
-exiting with status 1 and naming any stale file; it writes nothing. The pytest
-suite also regenerates twice into temporary trees and compares. The committed
-tables come from macOS arm64, where CI runs the check; other platforms differ
-slightly (tools/panelgen/README.md).
+Generation is deterministic, so `python -m panelgen --check` regenerates in memory
+and compares byte for byte with the committed files, exiting with status 1 and
+naming any stale file; it writes nothing. The pytest suite also regenerates twice
+into temporary trees and compares. A colour panel's tables are the same on every
+platform, because the C determines them
+([Init-time floating point](#init-time-floating-point)); only a grey panel's
+header can differ on Windows (tools/panelgen/README.md).
 
 ### Grey calibrations
 

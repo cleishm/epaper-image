@@ -2,7 +2,7 @@
 
 # The suite runs in app_main: a large stack, no task watchdog (tests hog the
 # CPU for minutes, more under emulation).
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=65536
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_ESP_TASK_WDT_EN=n
 CONFIG_ESP_INT_WDT=n
 
