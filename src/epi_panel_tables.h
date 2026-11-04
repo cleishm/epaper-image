@@ -108,23 +108,4 @@ extern const epi_preset_t epi_grey_presets[EPI_GREY_PRESET_COUNT];
 #define EPI_COLOUR_PRESET_COUNT 4
 extern const epi_preset_t epi_colour_presets[EPI_COLOUR_PRESET_COUNT];
 
-/*
- * Derives the colour tables of n inks (at most 16) from their measured colours, in
- * deterministic double (src/epi_colour_panel.c). *t must be zeroed; everything
- * but the detail kernel is written. Returns EPI_OK; EPI_ERR_INVALID_ARG if the
- * inks can't make a panel, with a short static reason in *why (non-NULL); or
- * EPI_ERR_CANCELLED if progress (optional) returned false, with *why not
- * meaningful. progress is called after each of the 360 hues of the cusp search
- * with (progress_ctx, hue count so far, 360); it sees no tables. *t is
- * unspecified after an error.
- */
-epi_err_t epi_colour_tables_derive(
-    const epi_ink_t* inks,
-    size_t n,
-    epi_colour_tables_t* t,
-    const char** why,
-    epi_progress_fn_t progress,
-    void* progress_ctx
-);
-
 #endif /* EPI_PANEL_TABLES_H */

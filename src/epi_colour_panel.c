@@ -523,7 +523,14 @@ static bool ink_tables(const epi_ink_t* inks, size_t n, const double wl[3], epi_
     return true;
 }
 
-epi_err_t epi_colour_tables_derive(
+/*
+ * Derives the colour tables of n inks (at most 16) from their measured colours. *t
+ * must be zeroed; everything but the detail kernel is written. Returns EPI_OK;
+ * EPI_ERR_INVALID_ARG if the inks can't make a panel, with a short static reason in
+ * *why; or EPI_ERR_CANCELLED if progress (optional) returned false. *t is unspecified
+ * after an error.
+ */
+static epi_err_t epi_colour_tables_derive(
     const epi_ink_t* inks,
     size_t n,
     epi_colour_tables_t* t,

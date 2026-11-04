@@ -276,17 +276,10 @@ void test_colour_panel_el133uf1(void) {
 /* ---- rejected inks -------------------------------------------------------------- */
 
 static void assert_rejected(const epi_ink_t* inks, size_t n, const char* reason) {
-    static epi_colour_tables_t t;
     static storage_t st;
-    memset(&t, 0, sizeof t);
-    const char* why = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_colour_tables_derive(inks, n, &t, &why, NULL, NULL));
-    TEST_ASSERT_EQUAL_STRING(reason, why);
-
-    /* Sizing doesn't look at the inks (only at their count, which is why fewer than
-     * five stop there with the ink-count reason). */
+    /* Sizing doesn't look at the inks. */
     const epi_colour_panel_config_t cfg = {"TEST", 800, 480, inks, n, 6.0f, NULL, NULL};
-    TEST_ASSERT_EQUAL_INT(n >= 5, epi_colour_panel_size(&cfg) != 0);
+    TEST_ASSERT_NOT_EQUAL(0, epi_colour_panel_size(&cfg));
     const epi_panel_t sentinel = {0};
     const epi_panel_t* p = &sentinel;
     const char* public_reason = "stale";
@@ -294,7 +287,7 @@ static void assert_rejected(const epi_ink_t* inks, size_t n, const char* reason)
         EPI_ERR_INVALID_ARG, epi_colour_panel_init(&cfg, st.bytes, sizeof st.bytes, &p, &public_reason)
     );
     TEST_ASSERT_NULL(p);
-    TEST_ASSERT_EQUAL_STRING(n >= 5 ? reason : "a colour panel needs 5 to 16 inks", public_reason);
+    TEST_ASSERT_EQUAL_STRING(reason, public_reason);
 }
 
 /* A strongly tinted black: the neutral axis enters the hull above it, so hues
@@ -313,46 +306,50 @@ void test_colour_panel_rejections(void) {
         INK(4, 100, 100, 60),
     };
     assert_rejected(coplanar, 5, "inks do not span three dimensions");
-    static const epi_ink_t duplicates[4] = {
-        INK(0, 100, 100, 100), INK(1, 100, 100, 100), INK(2, 100, 100, 100), INK(3, 100, 100, 100)
+    static const epi_ink_t duplicates[5] = {
+        INK(0, 100, 100, 100),
+        INK(1, 100, 100, 100),
+        INK(2, 100, 100, 100),
+        INK(3, 100, 100, 100),
+        INK(4, 100, 100, 100)
     };
-    assert_rejected(duplicates, 4, "inks do not span three dimensions");
-    static const epi_ink_t collinear[4] = {
-        INK(0, 30, 30, 30), INK(1, 100, 100, 100), INK(2, 150, 150, 150), INK(3, 200, 200, 200)
+    assert_rejected(duplicates, 5, "inks do not span three dimensions");
+    static const epi_ink_t collinear[5] = {
+        INK(0, 30, 30, 30), INK(1, 100, 100, 100), INK(2, 150, 150, 150), INK(3, 200, 200, 200), INK(4, 60, 60, 60)
     };
-    assert_rejected(collinear, 4, "inks do not span three dimensions");
+    assert_rejected(collinear, 5, "inks do not span three dimensions");
 
     /* So dark that white's reciprocal wouldn't fit. */
-    static const epi_ink_t too_dark[4] = {INK(0, 2, 2, 2), INK(1, 14, 14, 14), INK(2, 14, 4, 4), INK(3, 4, 4, 14)};
-    assert_rejected(too_dark, 4, "white ink too dark");
-    static const epi_ink_t white_no_blue[4] = {
-        INK(0, 40, 40, 40), INK(1, 210, 210, 0), INK(2, 170, 40, 40), INK(3, 50, 70, 150)
+    static const epi_ink_t too_dark[5] = {
+        INK(0, 2, 2, 2), INK(1, 14, 14, 14), INK(2, 14, 4, 4), INK(3, 4, 4, 14), INK(4, 4, 14, 4)
     };
-    assert_rejected(white_no_blue, 4, "white ink has a zero channel");
+    assert_rejected(too_dark, 5, "white ink too dark");
+    static const epi_ink_t white_no_blue[5] = {
+        INK(0, 40, 40, 40), INK(1, 210, 210, 0), INK(2, 170, 40, 40), INK(3, 50, 70, 150), INK(4, 60, 130, 90)
+    };
+    assert_rejected(white_no_blue, 5, "white ink has a zero channel");
     /* The blue ink has far more short-wave light than the yellowish white. */
-    static const epi_ink_t over_white[4] = {
-        INK(0, 40, 40, 40), INK(1, 200, 230, 60), INK(2, 170, 40, 40), INK(3, 40, 70, 255)
+    static const epi_ink_t over_white[5] = {
+        INK(0, 40, 40, 40), INK(1, 200, 230, 60), INK(2, 170, 40, 40), INK(3, 40, 70, 255), INK(4, 60, 130, 90)
     };
-    assert_rejected(over_white, 4, "ink outside the range the white ink allows");
+    assert_rejected(over_white, 5, "ink outside the range the white ink allows");
 
     /* Black just off the axis, to the far side: the axis meets the hull only at white. */
-    static const epi_ink_t off_axis[4] = {
-        INK(0, 40, 40, 41), INK(1, 200, 200, 200), INK(2, 170, 40, 40), INK(3, 205, 185, 50)
+    static const epi_ink_t off_axis[5] = {
+        INK(0, 40, 40, 41), INK(1, 200, 200, 200), INK(2, 170, 40, 40), INK(3, 205, 185, 50), INK(4, 190, 120, 45)
     };
-    assert_rejected(off_axis, 4, "neutral axis misses the ink hull");
+    assert_rejected(off_axis, 5, "neutral axis misses the ink hull");
     /* The same light black as panelgen's test: a contrast of about 2:1. */
-    static const epi_ink_t light_black[4] = {
-        INK(0, 170, 170, 170), INK(1, 240, 240, 240), INK(2, 235, 170, 170), INK(3, 170, 180, 240)
+    static const epi_ink_t light_black[5] = {
+        INK(0, 170, 170, 170),
+        INK(1, 240, 240, 240),
+        INK(2, 235, 170, 170),
+        INK(3, 170, 180, 240),
+        INK(4, 175, 235, 180)
     };
-    assert_rejected(light_black, 4, "darkest neutral L* is too light for the tone curve");
+    assert_rejected(light_black, 5, "darkest neutral L* is too light for the tone curve");
 
     assert_rejected(tinted_black, 5, TINTED_BLACK_REASON);
-    /* Four inks can't surround the neutral axis: white, black, and colours on one
-     * side, so the hues on the other side have no chroma to peak. */
-    static const epi_ink_t four[4] = {
-        INK(0, 40, 40, 40), INK(1, 200, 200, 200), INK(2, 170, 40, 40), INK(3, 205, 185, 50)
-    };
-    assert_rejected(four, 4, "a hue peaks too close to the end of the neutral range; often a strongly tinted black");
 }
 
 /* ---- the white ink ---------------------------------------------------------------- */
@@ -367,20 +364,6 @@ void test_colour_panel_rejections(void) {
 
 #define WHITE_REASON "lightest measured ink is not the white ink"
 
-/* assert_rejected through the public init as well. */
-static void assert_rejected_both(const epi_ink_t* inks, size_t n, const char* reason) {
-    static storage_t st;
-    assert_rejected(inks, n, reason);
-    const epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, 6.0f, NULL, NULL};
-    const epi_panel_t* p = NULL;
-    const char* why = NULL;
-    TEST_ASSERT_EQUAL_INT(
-        EPI_ERR_INVALID_ARG, epi_colour_panel_init(&cfg, st.bytes, epi_colour_panel_size(&cfg), &p, &why)
-    );
-    TEST_ASSERT_NULL(p);
-    TEST_ASSERT_EQUAL_STRING(reason, why);
-}
-
 /* The black ink is the darkest measured; its nominal colour must be the darkest
  * nominal too. */
 void test_colour_panel_black_is_darkest_nominal(void) {
@@ -394,7 +377,7 @@ void test_colour_panel_black_is_darkest_nominal(void) {
         INKN(5, 0, 0, 255, 60, 108, 177),
         INKN(6, 0, 255, 0, 87, 125, 107),
     };
-    assert_rejected_both(dark_yellow, 6, "darkest measured ink is not the black ink");
+    assert_rejected(dark_yellow, 6, "darkest measured ink is not the black ink");
     /* The same inks with no nominal colours skip the check, as for white. */
     static const epi_ink_t no_nominals[6] = {
         INKN(0, 0, 0, 0, 59, 62, 62),
@@ -404,10 +387,17 @@ void test_colour_panel_black_is_darkest_nominal(void) {
         INKN(5, 0, 0, 0, 60, 108, 177),
         INKN(6, 0, 0, 0, 87, 125, 107),
     };
-    epi_colour_tables_t t;
+    static storage_t st;
+    build(&st, no_nominals, 6, 6.0f);
+}
+
+/* Why init rejected the inks; NULL if it accepted them. */
+static const char* init_reason(storage_t* st, const epi_ink_t* inks, size_t n) {
+    const epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, 6.0f, NULL, NULL};
+    const epi_panel_t* p = NULL;
     const char* why = NULL;
-    memset(&t, 0, sizeof t);
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_colour_tables_derive(no_nominals, 6, &t, &why, NULL, NULL));
+    epi_colour_panel_init(&cfg, st->bytes, sizeof st->bytes, &p, &why);
+    return why;
 }
 
 /* The white ink is the lightest measured; its nominal colour must be the lightest
@@ -421,7 +411,7 @@ void test_colour_panel_white_is_lightest_nominal(void) {
         INKN(3, 255, 0, 0, 170, 40, 40),
         INKN(4, 0, 0, 255, 50, 70, 150),
     };
-    assert_rejected_both(pale_yellow, 5, WHITE_REASON);
+    assert_rejected(pale_yellow, 5, WHITE_REASON);
     static const epi_ink_t bright_yellow[5] = {
         INKN(0, 0, 0, 0, 40, 40, 40),
         INKN(1, 255, 255, 255, 204, 204, 204),
@@ -429,7 +419,7 @@ void test_colour_panel_white_is_lightest_nominal(void) {
         INKN(3, 255, 0, 0, 170, 40, 40),
         INKN(4, 0, 0, 255, 50, 70, 150),
     };
-    assert_rejected_both(bright_yellow, 5, WHITE_REASON);
+    assert_rejected(bright_yellow, 5, WHITE_REASON);
 
     /* With every nominal zeroed, or all equal, the check has nothing to compare. */
     epi_ink_t zeroed[5], equal[5];
@@ -439,12 +429,10 @@ void test_colour_panel_white_is_lightest_nominal(void) {
         zeroed[i].nominal = (epi_rgb_t){0, 0, 0};
         equal[i].nominal = (epi_rgb_t){255, 255, 255};
     }
-    static epi_colour_tables_t t;
-    const char* why = NULL;
-    epi_colour_tables_derive(zeroed, 5, &t, &why, NULL, NULL);
+    static storage_t st;
+    const char* why = init_reason(&st, zeroed, 5);
     TEST_ASSERT_TRUE(why == NULL || strcmp(why, WHITE_REASON) != 0);
-    why = NULL;
-    epi_colour_tables_derive(equal, 5, &t, &why, NULL, NULL);
+    why = init_reason(&st, equal, 5);
     TEST_ASSERT_TRUE(why == NULL || strcmp(why, WHITE_REASON) != 0);
 
     /* The white is the lightest nominal too: accepted. */
@@ -455,7 +443,7 @@ void test_colour_panel_white_is_lightest_nominal(void) {
         INKN(3, 0, 255, 0, 60, 140, 90),
         INKN(4, 0, 0, 255, 60, 80, 170),
     };
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_colour_tables_derive(consistent, 5, &t, &why, NULL, NULL));
+    build(&st, consistent, 5, 6.0f);
 }
 
 /* ---- the progress callback ------------------------------------------------------- */
