@@ -11,16 +11,15 @@
  *               -> epi_converter (tone, gamut, error diffusion to ink codes)
  *               -> panel rows
  *
- * The converter writes one ink code per pixel (EPI_OUT_CODES8) into a
- * frame buffer, because --rotate and --compare rearrange the frame before
- * it is packed. From that buffer, epi_pack_row makes the frame and
- * epi_preview makes the preview. Firmware that shows the image as rendered
- * would ask the converter for the packed format directly and send each row
- * as it pops.
+ * The converter writes one ink code per pixel into a frame buffer, because
+ * --rotate and --compare rearrange the frame before it is packed. From that
+ * buffer, epi_pack_row makes the frame and epi_preview makes the preview.
+ * Firmware that shows the image as rendered would pack each row as it pops
+ * and send it.
  *
- * OUTPUT receives the frame in the panel's native layout, packed the way
- * the converter's packed formats are (8/bits codes per byte, leftmost in
- * the most significant bits), rows top to bottom, no header.
+ * OUTPUT receives the frame in the panel's native layout, packed by
+ * epi_pack_row (8/bits codes per byte, leftmost in the most significant
+ * bits), rows top to bottom, no header.
  */
 
 #include "exif.h"
@@ -43,29 +42,16 @@
 typedef struct {
     const char* name;         /* --panel value */
     const epi_panel_t* panel; /* built-in calibration */
-    epi_output_t format;      /* the packed format the panel is sent */
+    epi_pack_format_t format; /* the packed format the panel is sent */
     const char* about;
 } panel_info_t;
 
 static const panel_info_t PANELS[] = {
-    {"el133uf1", &epi_panel_el133uf1, EPI_OUT_PACKED4, "13.3\" Spectra 6 colour (reTerminal E1004)"},
-    {"gdey075t7-mono", &epi_panel_gdey075t7_mono, EPI_OUT_PACKED1, "7.5\" black and white (XIAO EE05)"},
-    {"gdey075t7-grey4", &epi_panel_gdey075t7_grey4, EPI_OUT_PACKED2, "7.5\" 4-level grey (XIAO EE05)"},
+    {"el133uf1", &epi_panel_el133uf1, EPI_PACK_4BPP, "13.3\" Spectra 6 colour (reTerminal E1004)"},
+    {"gdey075t7-mono", &epi_panel_gdey075t7_mono, EPI_PACK_1BPP, "7.5\" black and white (XIAO EE05)"},
+    {"gdey075t7-grey4", &epi_panel_gdey075t7_grey4, EPI_PACK_2BPP, "7.5\" 4-level grey (XIAO EE05)"},
 };
 #define PANEL_COUNT (sizeof PANELS / sizeof PANELS[0])
-
-static unsigned bits_per_code(epi_output_t format) {
-    switch (format) {
-    case EPI_OUT_PACKED4:
-        return 4;
-    case EPI_OUT_PACKED2:
-        return 2;
-    case EPI_OUT_PACKED1:
-        return 1;
-    default:
-        return 8;
-    }
-}
 
 /* Index of the panel's lightest (or darkest) ink by measured luminance. */
 static size_t ink_by_lightness(const epi_panel_t* p, bool lightest) {
@@ -256,7 +242,7 @@ static bool parse_rgb(const char* s, epi_rgb_t* out) {
 static void print_panels(void) {
     for (size_t i = 0; i < PANEL_COUNT; i++) {
         const epi_panel_t* p = PANELS[i].panel;
-        const size_t bytes = epi_output_row_size(PANELS[i].format, p->width) * p->height;
+        const size_t bytes = epi_pack_row_size(PANELS[i].format, p->width) * p->height;
         printf("%-16s %s\n", PANELS[i].name, PANELS[i].about);
         printf(
             "%-16s %ux%u, %zu inks, %u bpp, %zu-byte frame\n",
@@ -264,7 +250,7 @@ static void print_panels(void) {
             (unsigned)p->width,
             (unsigned)p->height,
             p->ink_count,
-            bits_per_code(PANELS[i].format),
+            (unsigned)epi_pack_row_size(PANELS[i].format, 8),
             bytes
         );
         printf("%-16s presets: ", "");
@@ -512,7 +498,6 @@ static int render(
             .intent = &intents[k],
             .width = w,
             .height = h,
-            .output = EPI_OUT_CODES8,
         };
         const size_t size = epi_converter_workspace_size(&ccfg);
         cv_mem[k] = malloc(size ? size : 1);
@@ -678,7 +663,7 @@ static int write_key(const options_t* o, const size_t* cell_of) {
  */
 static int write_frame(const options_t* o, const uint8_t* view, uint16_t vw) {
     const epi_panel_t* p = o->panel->panel;
-    const size_t packed = epi_output_row_size(o->panel->format, p->width);
+    const size_t packed = epi_pack_row_size(o->panel->format, p->width);
     uint8_t* codes = malloc(p->width);
     uint8_t* row = malloc(packed);
     FILE* f = fopen(o->output, "wb");
@@ -732,7 +717,7 @@ static int write_preview(const options_t* o, const uint8_t* view, uint16_t vw, u
         .src_height = vh,
         .dst_width = preview_side(vw, o->preview_scale),
         .dst_height = preview_side(vh, o->preview_scale),
-        .output = o->nominal ? EPI_OUT_PREVIEW_NOMINAL : EPI_OUT_PREVIEW_MEASURED,
+        .nominal = o->nominal,
     };
     const size_t size = epi_preview_workspace_size(&cfg);
     void* mem = malloc(size ? size : 1);

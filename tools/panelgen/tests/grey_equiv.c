@@ -7,7 +7,8 @@
  * runtime with epi_grey_panel_init and requires every field of the tables,
  * the levels and the panel fields to be identical and the presets to be the
  * same, then runs
- * both panels through the converter and requires byte-identical output.
+ * both panels through the converter and the preview reducer and requires
+ * byte-identical output.
  * Prints one line per case; exit status is the number of mismatches.
  */
 #include "epaper_image.h"
@@ -74,12 +75,11 @@ static void image_row(uint16_t w, uint16_t y, epi_rgb_t* row) {
     }
 }
 
-/* Converts the test image; returns a malloc'd buffer of h rows. */
-static uint8_t*
-convert(const epi_panel_t* p, const epi_intent_t* intent, epi_output_t out, uint16_t w, uint16_t h, size_t* bytes) {
-    epi_config_t cfg = {p, intent, w, h, out};
+/* Converts the test image; returns a malloc'd buffer of h rows of ink codes. */
+static uint8_t* convert(const epi_panel_t* p, const epi_intent_t* intent, uint16_t w, uint16_t h) {
+    epi_config_t cfg = {p, intent, w, h};
     size_t ws = epi_converter_workspace_size(&cfg);
-    size_t rs = epi_output_row_size(out, w);
+    size_t rs = w;
     void* work = ws ? malloc(ws) : NULL;
     uint8_t* res = calloc(h, rs);
     epi_rgb_t* row = malloc(w * sizeof *row);
@@ -100,8 +100,30 @@ convert(const epi_panel_t* p, const epi_intent_t* intent, epi_output_t out, uint
     }
     free(work);
     free(row);
-    *bytes = rs * h;
     return got == h ? res : (free(res), NULL);
+}
+
+/* The codes' measured preview at their own size; a malloc'd buffer of h rows. */
+static uint8_t* preview(const epi_panel_t* p, const uint8_t* codes, uint16_t w, uint16_t h) {
+    epi_preview_config_t cfg = {.panel = p, .src_width = w, .src_height = h, .dst_width = w, .dst_height = h};
+    size_t ws = epi_preview_workspace_size(&cfg);
+    void* work = ws ? malloc(ws) : NULL;
+    epi_rgb_t* res = calloc(h, w * sizeof *res);
+    epi_preview_t* r = NULL;
+    if (work == NULL || res == NULL || epi_preview_init(&cfg, work, ws, &r) != EPI_OK) {
+        free(work);
+        free(res);
+        return NULL;
+    }
+    size_t got = 0;
+    for (uint16_t y = 0; y < h; y++) {
+        epi_preview_push(r, codes + (size_t)y * w);
+        while (got < h && epi_preview_pop(r, res + got * w) == EPI_OK) {
+            got++;
+        }
+    }
+    free(work);
+    return got == h ? (uint8_t*)res : (free(res), NULL);
 }
 
 static uint64_t fnv1a(const uint8_t* p, size_t n) {
@@ -156,22 +178,30 @@ int main(void) {
 
         /* Both panels through the converter, every preset, codes and preview. */
         uint64_t hsh = 1469598103934665603u;
-        static const epi_output_t outs[] = {EPI_OUT_CODES8, EPI_OUT_PREVIEW_MEASURED};
         for (size_t i = 0; i < g->preset_count && i < rt->preset_count; i++) {
-            for (size_t o = 0; o < sizeof outs / sizeof outs[0]; o++) {
-                size_t nb = 0, nr = 0;
-                uint8_t* a = convert(g, g->presets[i].intent, outs[o], 97, 61, &nb);
-                uint8_t* b = convert(rt, rt->presets[i].intent, outs[o], 97, 61, &nr);
-                if (a == NULL || b == NULL) {
-                    fail(id, "converter failed");
-                } else if (nb != nr || memcmp(a, b, nb) != 0) {
-                    fail(id, "converter output");
-                } else {
-                    hsh ^= fnv1a(a, nb) + i * 31 + o;
-                }
-                free(a);
-                free(b);
+            const size_t codes_bytes = (size_t)97 * 61, preview_bytes = codes_bytes * sizeof(epi_rgb_t);
+            uint8_t* a = convert(g, g->presets[i].intent, 97, 61);
+            uint8_t* b = convert(rt, rt->presets[i].intent, 97, 61);
+            if (a == NULL || b == NULL) {
+                fail(id, "converter failed");
+            } else if (memcmp(a, b, codes_bytes) != 0) {
+                fail(id, "converter output");
+            } else {
+                hsh ^= fnv1a(a, codes_bytes) + i * 31;
             }
+            uint8_t* pa = a != NULL ? preview(g, a, 97, 61) : NULL;
+            uint8_t* pb = b != NULL ? preview(rt, b, 97, 61) : NULL;
+            if (pa == NULL || pb == NULL) {
+                fail(id, "preview failed");
+            } else if (memcmp(pa, pb, preview_bytes) != 0) {
+                fail(id, "preview output");
+            } else {
+                hsh ^= fnv1a(pa, preview_bytes) + i * 31 + 1;
+            }
+            free(pa);
+            free(pb);
+            free(a);
+            free(b);
         }
         printf(
             "%s %s: %d table fields, %zu levels, %zu presets; whole-struct memcmp %s; output 0x%016llx\n",

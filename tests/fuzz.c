@@ -423,7 +423,6 @@ static const epi_panel_t* rand_grey(uint8_t* store, size_t cap) {
 }
 
 static long cv_ok;
-static long cv_invalid;
 static long grey_rand;
 
 static void fuzz_converter(int iters) {
@@ -454,17 +453,10 @@ static void fuzz_converter(int iters) {
             in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4)};
         }
         epi_config_t c = {
-            p,
-            ru(4) ? &in : NULL,
-            (uint16_t)(1 + ru(ru(8) ? 120 : 1500)),
-            (uint16_t)(1 + ru(ru(8) ? 80 : 300)),
-            (epi_output_t)ru(6)
+            p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(ru(8) ? 120 : 1500)), (uint16_t)(1 + ru(ru(8) ? 80 : 300))
         };
         size_t need = epi_converter_workspace_size(&c);
-        if (!need) {
-            cv_invalid++;
-            continue;
-        }
+        CHECK(need != 0, "workspace size rejected a valid config");
         unsigned mis = ru(32);
         uint8_t* raw = malloc(need + mis);
         CHECK(raw != NULL, "out of memory");
@@ -475,8 +467,7 @@ static void fuzz_converter(int iters) {
         );
         epi_err_t e = epi_converter_init(&c, raw + mis, need, &cv);
         CHECK(e == EPI_OK, "converter init: %s", epi_strerror(e));
-        size_t rs = epi_output_row_size(c.output, c.width);
-        uint8_t* out = malloc(rs);
+        uint8_t* out = malloc(c.width);
         epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
         CHECK(out != NULL && row != NULL, "out of memory");
         int mode = (int)ru(8);
@@ -497,7 +488,7 @@ static void fuzz_converter(int iters) {
         free(raw);
         cv_ok++;
     }
-    printf("converter: ok=%ld invalid=%ld (random grey %ld)\n", cv_ok, cv_invalid, grey_rand);
+    printf("converter: ok=%ld (random grey %ld)\n", cv_ok, grey_rand);
 }
 
 /* A built-in panel, or sometimes a random grey one (codes 0..level_count - 1). */
@@ -547,7 +538,7 @@ static void fuzz_preview(int iters) {
         }
         c.dst_width = (uint16_t)(1 + ru(c.src_width));
         c.dst_height = (uint16_t)(1 + ru(c.src_height));
-        c.output = ru(2) ? EPI_OUT_PREVIEW_MEASURED : EPI_OUT_PREVIEW_NOMINAL;
+        c.nominal = ru(2) != 0;
         const int broken = ru(16) == 0;
         if (broken) {
             switch (ru(4)) {
@@ -558,7 +549,7 @@ static void fuzz_preview(int iters) {
                 c.dst_height = 0;
                 break;
             case 2:
-                c.output = (epi_output_t)ru(4); /* CODES8 and the packed formats */
+                c.src_height = 0;
                 break;
             default:
                 c.panel = NULL;
@@ -589,7 +580,7 @@ static void fuzz_preview(int iters) {
         CHECK(in != NULL && out != NULL, "out of memory");
         const size_t ink = ru((uint32_t)p->ink_count);
         const int one_ink = ru(4) == 0;
-        const epi_rgb_t want = c.output == EPI_OUT_PREVIEW_NOMINAL ? p->inks[ink].nominal : p->inks[ink].measured;
+        const epi_rgb_t want = c.nominal ? p->inks[ink].nominal : p->inks[ink].measured;
         uint32_t got = 0;
         for (uint32_t y = 0; y < c.src_height; y++) {
             for (uint32_t x = 0; x < c.src_width; x++) {
@@ -640,27 +631,30 @@ static void fuzz_preview(int iters) {
 }
 
 /* Random widths and codes in an exactly sized row: the codes must unpack again, a
- * partial byte must carry the padding a 1x1 converter writes, and a panel or
- * format the converter refuses must be refused here too. */
+ * partial byte must carry the lightest ink's code, and a panel with a code too
+ * wide for the format must be refused. */
 static void fuzz_pack(int iters) {
     static uint8_t store[1 << 16];
-    static const epi_output_t formats[] = {EPI_OUT_PACKED4, EPI_OUT_PACKED2, EPI_OUT_PACKED1};
+    static const epi_pack_format_t formats[] = {EPI_PACK_4BPP, EPI_PACK_2BPP, EPI_PACK_1BPP};
     long ok = 0, refused = 0, wide = 0;
     for (int it = 0; it < iters; it++) {
         const epi_panel_t* p = rand_panel(store, sizeof store - 16);
-        const epi_output_t format = formats[ru(3)];
-        const unsigned bits = format == EPI_OUT_PACKED4 ? 4u : format == EPI_OUT_PACKED2 ? 2u : 1u;
+        const epi_pack_format_t format = formats[ru(3)];
+        const unsigned bits = format == EPI_PACK_4BPP ? 4u : format == EPI_PACK_2BPP ? 2u : 1u;
         const uint16_t w = (uint16_t)(ru(16) ? 1 + ru(ru(4) ? 64 : 4000) : 65535);
-        const size_t rs = epi_output_row_size(format, w);
+        const size_t rs = epi_pack_row_size(format, w);
+        CHECK(rs == ((size_t)w * bits + 7u) / 8u, "row size %zu at width %u", rs, (unsigned)w);
         uint8_t* in = malloc(w);
         uint8_t* out = malloc(rs);
         CHECK(in != NULL && out != NULL, "out of memory");
         for (uint32_t x = 0; x < w; x++) {
             in[x] = p->inks[ru((uint32_t)p->ink_count)].code;
         }
-        const epi_config_t one = {p, NULL, 1, 1, format};
-        const size_t need = epi_converter_workspace_size(&one);
-        if (need == 0) {
+        bool fits = true;
+        for (size_t i = 0; i < p->ink_count; i++) {
+            fits = fits && (p->inks[i].code >> bits) == 0;
+        }
+        if (!fits) {
             CHECK(epi_pack_row(p, format, in, w, out) == EPI_ERR_INVALID_ARG, "a panel too wide for the format passed");
             refused++;
         } else {
@@ -670,15 +664,8 @@ static void fuzz_pack(int iters) {
                 const unsigned code = (out[x / per] >> (8u - bits - (x % per) * bits)) & mask;
                 CHECK(code == in[x], "code %u at x=%u unpacked as %u", (unsigned)in[x], (unsigned)x, code);
             }
-            void* ws = malloc(need);
-            CHECK(ws != NULL, "out of memory");
-            epi_converter_t* cv = NULL;
-            CHECK(epi_converter_init(&one, ws, need, &cv) == EPI_OK, "converter init");
-            const epi_rgb_t px = {128, 128, 128};
-            uint8_t conv = 0;
-            CHECK(epi_converter_push(cv, &px) == EPI_OK && epi_converter_pop(cv, &conv) == EPI_OK, "1x1 convert");
-            free(ws);
-            const unsigned pad = conv & mask;
+            /* EL133UF1's white is code 1; a grey panel lists its levels darkest first. */
+            const unsigned pad = p == &epi_panel_el133uf1 ? 1u : p->inks[p->ink_count - 1].code;
             for (uint32_t x = w; x % per != 0; x++) {
                 const unsigned code = (out[x / per] >> (8u - bits - (x % per) * bits)) & mask;
                 CHECK(code == pad, "padding %u, want %u at width %u", code, pad, (unsigned)w);

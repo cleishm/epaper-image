@@ -140,7 +140,7 @@ and σ, and requires all of the following to be identical:
 - every field of `epi_grey_tables_t`;
 - the levels, name, size and σ bits;
 - the presets;
-- the converter output for every preset, as codes and as a measured preview.
+- the converter's ink codes for every preset, and their measured preview.
 
 Negative controls check that a 1-LSB change in a threshold, `level_y` or the
 kernel, or a wrong preset count, is caught. The suite also checks the refusals,

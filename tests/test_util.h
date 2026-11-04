@@ -136,20 +136,19 @@ static inline void fill_hue_ramp(epi_rgb_t* img, int w, int h) {
 
 /* ---- converter drivers -------------------------------------------------------- */
 
-static inline epi_config_t config(const epi_panel_t* p, uint16_t w, uint16_t h, epi_output_t out) {
+static inline epi_config_t config(const epi_panel_t* p, uint16_t w, uint16_t h) {
     epi_config_t c;
     memset(&c, 0, sizeof c);
     c.panel = p;
     c.intent = NULL;
     c.width = w;
     c.height = h;
-    c.output = out;
     return c;
 }
 
 /* Streams img through a converter in ws (size bytes), popping until not OK
  * after every push and checking the lag (rows out = max(0, y − r + 1), all
- * after the last push). out receives H rows of epi_output_row_size bytes.
+ * after the last push). out receives H rows of W ink codes.
  * first_ready (optional) is the input row after whose push the first output
  * row appeared. Returns the number of rows popped. */
 static inline int
@@ -157,7 +156,7 @@ run_converter_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t
     epi_converter_t* c = NULL;
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
     TEST_ASSERT_NOT_NULL(c);
-    const size_t rs = epi_output_row_size(cfg->output, cfg->width);
+    const size_t rs = cfg->width;
     const int r = cfg->panel->tables->kernel_radius, h = cfg->height;
     int n = 0;
     if (first_ready != NULL) {
@@ -196,7 +195,7 @@ static inline int run_converter(const epi_config_t* cfg, const epi_rgb_t* img, u
     return n;
 }
 
-/* A CODES8 run in a zeroed workspace is the reference; runs in workspaces
+/* A run in a zeroed workspace is the reference; runs in workspaces
  * filled with other bytes must reproduce it. a and b are width × height. */
 static inline void
 check_dirty_workspace(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t size, uint8_t* a, uint8_t* b) {
@@ -211,7 +210,7 @@ check_dirty_workspace(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, s
     }
 }
 
-/* CODES8 output → ink index, by code (the test panels' codes are distinct). */
+/* Ink code → ink index, by code (the test panels' codes are distinct). */
 static inline int code_to_index(const epi_panel_t* p, uint8_t code) {
     size_t i = 0;
     while (i < p->ink_count && p->inks[i].code != code) {
@@ -221,6 +220,49 @@ static inline int code_to_index(const epi_panel_t* p, uint8_t code) {
         TEST_FAIL_MESSAGE("unknown code");
     }
     return (int)i;
+}
+
+/* ---- what ink codes become --------------------------------------------- */
+
+/* Rows of w × h codes through epi_pack_row and unpacked again here: the hash of
+ * the codes that come back, for comparing with the goldens' hash of the codes. */
+static inline uint64_t
+packed_codes_hash(const epi_panel_t* p, epi_pack_format_t format, unsigned bits, const uint8_t* codes, int w, int h) {
+    const size_t n = (size_t)w * h;
+    uint8_t* row = xmalloc(epi_pack_row_size(format, (uint16_t)w));
+    uint8_t* back = xmalloc(n);
+    for (int y = 0; y < h; y++) {
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(p, format, codes + (size_t)y * w, (uint16_t)w, row));
+        for (int x = 0; x < w; x++) {
+            const unsigned bit = (unsigned)x * bits;
+            back[(size_t)y * w + x] = (uint8_t)((row[bit / 8u] >> (8u - bits - bit % 8u)) & ((1u << bits) - 1u));
+        }
+    }
+    const uint64_t hsh = fnv1a64(back, n);
+    free(back);
+    free(row);
+    return hsh;
+}
+
+/* A preview of w × h codes at the same size. */
+static inline void
+preview_same_size(const epi_panel_t* p, bool nominal, const uint8_t* codes, int w, int h, epi_rgb_t* out) {
+    epi_preview_config_t c;
+    memset(&c, 0, sizeof c);
+    c.panel = p;
+    c.src_width = c.dst_width = (uint16_t)w;
+    c.src_height = c.dst_height = (uint16_t)h;
+    c.nominal = nominal;
+    const size_t size = epi_preview_workspace_size(&c);
+    TEST_ASSERT_NOT_EQUAL(0, size);
+    void* ws = xmalloc(size);
+    epi_preview_t* r = NULL;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_preview_init(&c, ws, size, &r));
+    for (int y = 0; y < h; y++) {
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_preview_push(r, codes + (size_t)y * w));
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_preview_pop(r, out + (size_t)y * w));
+    }
+    free(ws);
 }
 
 /* Rows y − r .. y + r of the horizontally blurred image hb (w × h), edge rows

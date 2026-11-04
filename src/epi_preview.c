@@ -42,8 +42,7 @@ static bool valid_panel(const epi_panel_t* p) {
 static bool valid_config(const epi_preview_config_t* cfg) {
     return cfg != NULL && valid_panel(cfg->panel) && cfg->src_width >= 1 && cfg->src_height >= 1 &&
         cfg->dst_width >= 1 && cfg->dst_height >= 1 && cfg->dst_width <= cfg->src_width &&
-        cfg->dst_height <= cfg->src_height &&
-        (cfg->output == EPI_OUT_PREVIEW_MEASURED || cfg->output == EPI_OUT_PREVIEW_NOMINAL);
+        cfg->dst_height <= cfg->src_height;
 }
 
 size_t epi_preview_workspace_size(const epi_preview_config_t* cfg) {
@@ -81,7 +80,7 @@ epi_err_t epi_preview_init(const epi_preview_config_t* cfg, void* workspace, siz
     p->dst_height = cfg->dst_height;
     for (size_t i = 0; i < cfg->panel->ink_count; i++) {
         const epi_ink_t* ink = &cfg->panel->inks[i];
-        const epi_rgb_t c = cfg->output == EPI_OUT_PREVIEW_NOMINAL ? ink->nominal : ink->measured;
+        const epi_rgb_t c = cfg->nominal ? ink->nominal : ink->measured;
         p->lin[ink->code][0] = epi_srgb_to_lin_q16[c.r];
         p->lin[ink->code][1] = epi_srgb_to_lin_q16[c.g];
         p->lin[ink->code][2] = epi_srgb_to_lin_q16[c.b];
@@ -197,8 +196,8 @@ epi_err_t epi_preview_pop(epi_preview_t* p, epi_rgb_t* dst_row) {
     return EPI_OK;
 }
 
-/* The code of the ink with the largest measured luminance, as the converter
- * pads; ties go to the lowest index. */
+/* The code of the ink with the largest measured luminance; ties go to the lowest
+ * index. */
 static uint8_t lightest_code(const epi_panel_t* p) {
     size_t best = 0;
     int64_t best_y = INT64_MIN;
@@ -212,23 +211,33 @@ static uint8_t lightest_code(const epi_panel_t* p) {
     return p->inks[best].code;
 }
 
-epi_err_t
-epi_pack_row(const epi_panel_t* panel, epi_output_t output, const uint8_t* codes, uint16_t width, void* out_row) {
-    unsigned bits;
-    switch (output) {
-    case EPI_OUT_PACKED4:
-        bits = 4;
-        break;
-    case EPI_OUT_PACKED2:
-        bits = 2;
-        break;
-    case EPI_OUT_PACKED1:
-        bits = 1;
-        break;
+/* Bits per pixel of a packed format, 0 if invalid. */
+static unsigned pack_bits(epi_pack_format_t format) {
+    switch (format) {
+    case EPI_PACK_4BPP:
+        return 4;
+    case EPI_PACK_2BPP:
+        return 2;
+    case EPI_PACK_1BPP:
+        return 1;
     default:
-        return EPI_ERR_INVALID_ARG;
+        return 0;
     }
-    if (!valid_panel(panel) || codes == NULL || width < 1 || out_row == NULL) {
+}
+
+size_t epi_pack_row_size(epi_pack_format_t format, uint16_t width) {
+    return ((size_t)width * pack_bits(format) + 7u) / 8u;
+}
+
+epi_err_t epi_pack_row(
+    const epi_panel_t* panel,
+    epi_pack_format_t format,
+    const uint8_t* codes,
+    uint16_t width,
+    uint8_t* out_row
+) {
+    const unsigned bits = pack_bits(format);
+    if (bits == 0 || !valid_panel(panel) || codes == NULL || width < 1 || out_row == NULL) {
         return EPI_ERR_INVALID_ARG;
     }
     const unsigned limit = 1u << bits;
@@ -244,15 +253,14 @@ epi_pack_row(const epi_panel_t* panel, epi_output_t output, const uint8_t* codes
     }
     const uint8_t pad = lightest_code(panel);
     const unsigned per = 8u / bits;
-    const size_t n = epi_output_row_size(output, width);
-    uint8_t* out = (uint8_t*)out_row;
+    const size_t n = epi_pack_row_size(format, width);
     for (size_t b = 0; b < n; b++) {
         unsigned v = 0;
         for (unsigned k = 0; k < per; k++) {
             const size_t x = b * per + k;
             v = (v << bits) | (x < width ? codes[x] : pad);
         }
-        out[b] = (uint8_t)v;
+        out_row[b] = (uint8_t)v;
     }
     return EPI_OK;
 }

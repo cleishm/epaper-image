@@ -1,7 +1,7 @@
 /*
- * Tests for the preview reducer and the row packer (src/epi_preview.c):
- * agreement with the converter's outputs, hand-computed reductions, rounding and
- * tie rules, validation and the push/pop protocol.
+ * Tests for the preview reducer and the row packer (src/epi_preview.c): packed
+ * bytes against the definition, previews against the inks' colours, hand-computed
+ * reductions, rounding and tie rules, validation and the push/pop protocol.
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L /* fork, waitpid, _exit for the death test */
@@ -53,7 +53,7 @@ static void make_cfg(
     uint16_t sh,
     uint16_t dw,
     uint16_t dh,
-    epi_output_t o
+    bool nominal
 ) {
     memset(c, 0, sizeof *c);
     c->panel = p;
@@ -61,7 +61,7 @@ static void make_cfg(
     c->src_height = sh;
     c->dst_width = dw;
     c->dst_height = dh;
-    c->output = o;
+    c->nominal = nominal;
 }
 
 /* Streams codes through a reducer in ws, popping until not OK after every push,
@@ -108,7 +108,7 @@ static void check_hand(
     epi_preview_config_t c;
     epi_rgb_t got[16];
     TEST_ASSERT_TRUE((size_t)dw * dh <= sizeof got / sizeof got[0]);
-    make_cfg(&c, &HAND_PANEL, sw, sh, dw, dh, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, sw, sh, dw, dh, false);
     reduce(&c, codes, got);
     TEST_ASSERT_EQUAL_UINT8_ARRAY(want, (const uint8_t*)got, (size_t)dw * dh * 3);
 }
@@ -139,69 +139,98 @@ static const epi_panel_t* free_code_grey(void) {
 
 /* ---- packer ---------------------------------------------------------------- */
 
-static void check_pack_panel(const epi_panel_t* p) {
-    static const epi_output_t formats[] = {EPI_OUT_PACKED4, EPI_OUT_PACKED2, EPI_OUT_PACKED1};
+void test_preview_pack_row_size(void) {
+    TEST_ASSERT_EQUAL_size_t(4, epi_pack_row_size(EPI_PACK_4BPP, 7));
+    TEST_ASSERT_EQUAL_size_t(2, epi_pack_row_size(EPI_PACK_2BPP, 7));
+    TEST_ASSERT_EQUAL_size_t(1, epi_pack_row_size(EPI_PACK_1BPP, 7));
+    TEST_ASSERT_EQUAL_size_t(2, epi_pack_row_size(EPI_PACK_1BPP, 9));
+    TEST_ASSERT_EQUAL_size_t(600, epi_pack_row_size(EPI_PACK_4BPP, 1200));
+    TEST_ASSERT_EQUAL_size_t(32768, epi_pack_row_size(EPI_PACK_4BPP, 65535));
+    TEST_ASSERT_EQUAL_size_t(16384, epi_pack_row_size(EPI_PACK_2BPP, 65535));
+    TEST_ASSERT_EQUAL_size_t(8192, epi_pack_row_size(EPI_PACK_1BPP, 65535));
+    TEST_ASSERT_EQUAL_size_t(0, epi_pack_row_size((epi_pack_format_t)3, 7));
+    TEST_ASSERT_EQUAL_size_t(0, epi_pack_row_size((epi_pack_format_t)99, 7));
+    TEST_ASSERT_EQUAL_size_t(0, epi_pack_row_size(EPI_PACK_4BPP, 0));
+    TEST_ASSERT_EQUAL_size_t(0, epi_pack_row_size(EPI_PACK_2BPP, 0));
+    TEST_ASSERT_EQUAL_size_t(0, epi_pack_row_size(EPI_PACK_1BPP, 0));
+}
+
+/* The bytes from the definition: each pixel's slot in its byte, leftmost highest,
+ * the slots past the row holding pad (the lightest ink's code, stated by the
+ * caller). A panel with a code too wide for the format is rejected, even for a
+ * row whose codes would fit. */
+static void check_pack_panel(const epi_panel_t* p, uint8_t pad) {
+    static const struct {
+        epi_pack_format_t format;
+        unsigned bits;
+    } formats[] = {{EPI_PACK_4BPP, 4}, {EPI_PACK_2BPP, 2}, {EPI_PACK_1BPP, 1}};
     static const uint16_t widths[] = {1, 2, 3, 4, 5, 7, 8, 9, 13, 16, 33};
-    const uint16_t h = 7;
+    uint32_t seed = 4242;
     for (size_t f = 0; f < sizeof formats / sizeof formats[0]; f++) {
+        const unsigned bits = formats[f].bits, per = 8u / bits;
+        bool fits = true;
+        for (size_t i = 0; i < p->ink_count; i++) {
+            fits = fits && (p->inks[i].code >> bits) == 0;
+        }
         for (size_t wi = 0; wi < sizeof widths / sizeof widths[0]; wi++) {
             const uint16_t w = widths[wi];
-            const size_t rs = epi_output_row_size(formats[f], w);
-            uint8_t* got = xmalloc(rs);
-            epi_config_t packed_cfg = config(p, w, h, formats[f]);
-            epi_config_t codes_cfg = config(p, w, h, EPI_OUT_CODES8);
-            epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
-            uint8_t* codes = xmalloc((size_t)w * h);
-            fill_noise(img, (size_t)w * h, 4242u + w);
-            TEST_ASSERT_EQUAL_INT(h, run_converter(&codes_cfg, img, codes, NULL));
-            if (epi_converter_workspace_size(&packed_cfg) == 0) {
-                /* The panel's codes don't fit: rejected like the converter, even for
-                 * a row whose codes would. */
-                memset(codes, 0, w);
-                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(p, formats[f], codes, w, got));
-            } else {
-                uint8_t* want = xmalloc(rs * h);
-                TEST_ASSERT_EQUAL_INT(h, run_converter(&packed_cfg, img, want, NULL));
-                for (uint16_t y = 0; y < h; y++) {
-                    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(p, formats[f], codes + (size_t)y * w, w, got));
-                    TEST_ASSERT_EQUAL_MEMORY(want + (size_t)y * rs, got, rs);
+            const size_t rs = w / per + (w % per != 0);
+            TEST_ASSERT_EQUAL_size_t(rs, epi_pack_row_size(formats[f].format, w));
+            uint8_t* codes = xmalloc(w);
+            uint8_t* want = xmalloc(rs);
+            uint8_t* got = xmalloc(rs + 1);
+            if (fits) {
+                for (size_t x = 0; x < w; x++) {
+                    codes[x] = p->inks[xorshift32(&seed) % p->ink_count].code;
                 }
-                free(want);
+                memset(want, 0, rs);
+                for (size_t slot = 0; slot < rs * per; slot++) {
+                    const unsigned code = slot < w ? codes[slot] : pad;
+                    const unsigned shift = 8u - bits * (unsigned)(slot % per + 1);
+                    want[slot / per] = (uint8_t)(want[slot / per] | (code << shift));
+                }
+                got[rs] = 0x5a;
+                TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(p, formats[f].format, codes, w, got));
+                TEST_ASSERT_EQUAL_UINT8_ARRAY(want, got, rs);
+                TEST_ASSERT_EQUAL_UINT8(0x5a, got[rs]);
+            } else {
+                memset(codes, 0, w);
+                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(p, formats[f].format, codes, w, got));
             }
-            free(codes);
-            free(img);
             free(got);
+            free(want);
+            free(codes);
         }
     }
 }
 
-void test_preview_pack_matches_converter(void) {
-    for (size_t i = 0; i < BUILT_IN_COUNT; i++) {
-        check_pack_panel(BUILT_IN[i]);
-    }
-    check_pack_panel(free_code_grey());
+void test_preview_pack_reference(void) {
+    check_pack_panel(&epi_panel_el133uf1, 1);        /* white */
+    check_pack_panel(&epi_panel_gdey075t7_mono, 1);  /* white */
+    check_pack_panel(&epi_panel_gdey075t7_grey4, 3); /* white */
+    check_pack_panel(free_code_grey(), 1);
 }
 
 void test_preview_pack_bytes(void) {
     uint8_t out[2];
     /* EL133UF1's white is code 1, not its last ink or largest code. */
     const uint8_t colour[] = {1, 2, 3};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_el133uf1, EPI_OUT_PACKED4, colour, 3, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_el133uf1, EPI_PACK_4BPP, colour, 3, out));
     TEST_ASSERT_EQUAL_UINT8(0x12, out[0]);
     TEST_ASSERT_EQUAL_UINT8(0x31, out[1]);
 
     const uint8_t grey[] = {0, 1, 2, 3, 2};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_gdey075t7_grey4, EPI_OUT_PACKED2, grey, 5, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_gdey075t7_grey4, EPI_PACK_2BPP, grey, 5, out));
     TEST_ASSERT_EQUAL_UINT8(0x1b, out[0]);
     TEST_ASSERT_EQUAL_UINT8(0xbf, out[1]); /* 2, then three of 3 */
 
     const uint8_t mono[] = {1, 0, 0};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_gdey075t7_mono, EPI_OUT_PACKED1, mono, 3, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&epi_panel_gdey075t7_mono, EPI_PACK_1BPP, mono, 3, out));
     TEST_ASSERT_EQUAL_UINT8(0x9f, out[0]); /* 100, then five of 1 */
 
     /* Lightest last with code 1, so the pad is not the top code. */
     const uint8_t freeform[] = {3};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(free_code_grey(), EPI_OUT_PACKED2, freeform, 1, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(free_code_grey(), EPI_PACK_2BPP, freeform, 1, out));
     TEST_ASSERT_EQUAL_UINT8(0xd5, out[0]);
 
     /* Equally light inks: the pad is the first of them. */
@@ -210,7 +239,7 @@ void test_preview_pack_bytes(void) {
     };
     const epi_panel_t tied_panel = {.name = "tied", .inks = tied, .ink_count = 3};
     const uint8_t zero[] = {0};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&tied_panel, EPI_OUT_PACKED4, zero, 1, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&tied_panel, EPI_PACK_4BPP, zero, 1, out));
     TEST_ASSERT_EQUAL_UINT8(0x02, out[0]);
 }
 
@@ -220,71 +249,95 @@ void test_preview_pack_validation(void) {
     uint8_t out[4];
     memset(out, 0x5a, sizeof out);
 
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(mono, EPI_OUT_PACKED1, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(mono, EPI_PACK_1BPP, codes, 4, out));
     memset(out, 0x5a, sizeof out);
 
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(NULL, EPI_OUT_PACKED1, codes, 4, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED1, NULL, 4, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED1, codes, 4, NULL));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED1, codes, 0, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(NULL, EPI_PACK_1BPP, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_1BPP, NULL, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_1BPP, codes, 4, NULL));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_1BPP, codes, 0, out));
 
     const epi_panel_t no_inks = {.name = "none", .inks = NULL, .ink_count = 0};
     const epi_panel_t zero_inks = {.name = "none", .inks = HAND_INKS, .ink_count = 0};
     const epi_panel_t null_inks = {.name = "none", .inks = NULL, .ink_count = 4};
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&no_inks, EPI_OUT_PACKED1, codes, 4, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&zero_inks, EPI_OUT_PACKED1, codes, 4, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&null_inks, EPI_OUT_PACKED1, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&no_inks, EPI_PACK_1BPP, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&zero_inks, EPI_PACK_1BPP, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&null_inks, EPI_PACK_1BPP, codes, 4, out));
 
-    static const epi_output_t not_packed[] = {
-        EPI_OUT_CODES8, EPI_OUT_PREVIEW_MEASURED, EPI_OUT_PREVIEW_NOMINAL, (epi_output_t)99
-    };
-    for (size_t i = 0; i < sizeof not_packed / sizeof not_packed[0]; i++) {
-        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, not_packed[i], codes, 4, out));
-    }
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, (epi_pack_format_t)3, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, (epi_pack_format_t)99, codes, 4, out));
 
     /* A code too wide for the format, in any position, and in the panel's inks. */
     const uint8_t wide_first[] = {2, 1, 0, 1}, wide_last[] = {0, 1, 0, 2};
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED1, wide_first, 4, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED1, wide_last, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_1BPP, wide_first, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_1BPP, wide_last, 4, out));
     const uint8_t wide4[] = {16};
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED4, wide4, 1, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_4BPP, wide4, 1, out));
     const uint8_t wide2[] = {4};
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_OUT_PACKED2, wide2, 1, out));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&epi_panel_el133uf1, EPI_OUT_PACKED2, codes, 4, out));
-    TEST_ASSERT_EQUAL_INT(
-        EPI_ERR_INVALID_ARG, epi_pack_row(&epi_panel_gdey075t7_grey4, EPI_OUT_PACKED1, codes, 4, out)
-    );
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(mono, EPI_PACK_2BPP, wide2, 1, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&epi_panel_el133uf1, EPI_PACK_2BPP, codes, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&epi_panel_gdey075t7_grey4, EPI_PACK_1BPP, codes, 4, out));
 
     /* Nothing was written. */
     for (size_t i = 0; i < sizeof out; i++) {
         TEST_ASSERT_EQUAL_UINT8(0x5a, out[i]);
     }
+
+    /* The panel's codes, at each format's limit, for a row whose own codes fit. */
+    epi_ink_t limit_inks[] = {{0, {0, 0, 0}, {0, 0, 0}}, {1, {255, 255, 255}, {255, 255, 255}}};
+    const epi_panel_t limit = {.name = "limit", .inks = limit_inks, .ink_count = 2};
+    const uint8_t zeros[] = {0, 0, 0, 0};
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&limit, EPI_PACK_1BPP, zeros, 4, out));
+    limit_inks[1].code = 2;
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&limit, EPI_PACK_1BPP, zeros, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&limit, EPI_PACK_2BPP, zeros, 4, out));
+    limit_inks[1].code = 3;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&limit, EPI_PACK_2BPP, zeros, 4, out));
+    limit_inks[1].code = 4;
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&limit, EPI_PACK_2BPP, zeros, 4, out));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&limit, EPI_PACK_4BPP, zeros, 4, out));
+    limit_inks[1].code = 15;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(&limit, EPI_PACK_4BPP, zeros, 4, out));
+    limit_inks[1].code = 16;
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(&limit, EPI_PACK_4BPP, zeros, 4, out));
 }
 
-/* ---- reducer: agreement with the converter --------------------------------- */
+/* ---- reducer: at the source's size ----------------------------------------- */
 
-static void check_identity(const epi_panel_t* p, const epi_rgb_t* img, uint16_t w, uint16_t h) {
-    static const epi_output_t previews[] = {EPI_OUT_PREVIEW_MEASURED, EPI_OUT_PREVIEW_NOMINAL};
+/* Each pixel is exactly the colour of its code's ink, by a map built here. */
+static void check_identity_codes(const epi_panel_t* p, const uint8_t* codes, uint16_t w, uint16_t h) {
+    epi_rgb_t colours[2][256];
+    memset(colours, 0, sizeof colours);
+    for (size_t i = 0; i < p->ink_count; i++) {
+        colours[0][p->inks[i].code] = p->inks[i].measured;
+        colours[1][p->inks[i].code] = p->inks[i].nominal;
+    }
     const size_t n = (size_t)w * h;
-    uint8_t* codes = xmalloc(n);
-    epi_rgb_t* want = xmalloc(n * sizeof *want);
     epi_rgb_t* got = xmalloc(n * sizeof *got);
-    epi_config_t codes_cfg = config(p, w, h, EPI_OUT_CODES8);
-    TEST_ASSERT_EQUAL_INT(h, run_converter(&codes_cfg, img, codes, NULL));
-    for (size_t k = 0; k < 2; k++) {
-        epi_config_t preview_cfg = config(p, w, h, previews[k]);
-        TEST_ASSERT_EQUAL_INT(h, run_converter(&preview_cfg, img, (uint8_t*)want, NULL));
+    for (int k = 0; k < 2; k++) {
         epi_preview_config_t c;
-        make_cfg(&c, p, w, h, w, h, previews[k]);
+        make_cfg(&c, p, w, h, w, h, k == 1);
         reduce(&c, codes, got);
-        TEST_ASSERT_EQUAL_MEMORY(want, got, n * sizeof *want);
+        for (size_t i = 0; i < n; i++) {
+            TEST_ASSERT_EQUAL_RGB(colours[k][codes[i]], got[i]);
+        }
     }
     free(got);
-    free(want);
+}
+
+/* The converter's codes for img, with every ink somewhere in the first row. */
+static void check_identity(const epi_panel_t* p, const epi_rgb_t* img, uint16_t w, uint16_t h) {
+    uint8_t* codes = xmalloc((size_t)w * h);
+    epi_config_t codes_cfg = config(p, w, h);
+    TEST_ASSERT_EQUAL_INT(h, run_converter(&codes_cfg, img, codes, NULL));
+    for (size_t x = 0; x < w; x++) {
+        codes[x] = p->inks[x % p->ink_count].code;
+    }
+    check_identity_codes(p, codes, w, h);
     free(codes);
 }
 
-void test_preview_identity_matches_converter(void) {
+void test_preview_identity_ink_colours(void) {
     const uint16_t w = 41, h = 29;
     epi_rgb_t* noise = xmalloc((size_t)w * h * sizeof *noise);
     epi_rgb_t* ramp = xmalloc((size_t)w * h * sizeof *ramp);
@@ -297,6 +350,13 @@ void test_preview_identity_matches_converter(void) {
     check_identity(free_code_grey(), noise, w, h);
     free(ramp);
     free(noise);
+
+    uint8_t hand[9 * 5];
+    uint32_t seed = 909;
+    for (size_t i = 0; i < sizeof hand; i++) {
+        hand[i] = HAND_INKS[xorshift32(&seed) % HAND_PANEL.ink_count].code;
+    }
+    check_identity_codes(&HAND_PANEL, hand, 9, 5);
 }
 
 /* ---- reducer: exact values ------------------------------------------------- */
@@ -310,12 +370,12 @@ static void check_single_ink(const epi_panel_t* p) {
             epi_rgb_t got[9 * 7];
             memset(codes, p->inks[k].code, sizeof codes);
             epi_preview_config_t c;
-            make_cfg(&c, p, sw, sh, dw, dh, EPI_OUT_PREVIEW_MEASURED);
+            make_cfg(&c, p, sw, sh, dw, dh, false);
             reduce(&c, codes, got);
             for (int i = 0; i < dw * dh; i++) {
                 TEST_ASSERT_EQUAL_RGB(p->inks[k].measured, got[i]);
             }
-            make_cfg(&c, p, sw, sh, dw, dh, EPI_OUT_PREVIEW_NOMINAL);
+            make_cfg(&c, p, sw, sh, dw, dh, true);
             reduce(&c, codes, got);
             for (int i = 0; i < dw * dh; i++) {
                 TEST_ASSERT_EQUAL_RGB(p->inks[k].nominal, got[i]);
@@ -340,14 +400,14 @@ void test_preview_largest_sides(void) {
     const epi_rgb_t cyan = {0, 128, 255};
 
     epi_preview_config_t c;
-    make_cfg(&c, &HAND_PANEL, big, 1, 61, 1, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, big, 1, 61, 1, false);
     reduce(&c, row, got);
     for (int i = 0; i < 61; i++) {
         TEST_ASSERT_EQUAL_RGB(cyan, got[i]);
     }
     free(row);
 
-    make_cfg(&c, &HAND_PANEL, 1, big, 1, 61, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, 1, big, 1, 61, false);
     size_t size = epi_preview_workspace_size(&c);
     void* ws = xmalloc(size);
     epi_preview_t* p = NULL;
@@ -383,12 +443,12 @@ void test_preview_checkerboard(void) {
     epi_rgb_t got[W / 2 * H / 2];
     const epi_rgb_t want = {188, 188, 188}; /* linear 32768; averaging sRGB values would give 128 */
     epi_preview_config_t c;
-    make_cfg(&c, p, W, H, W / 2, H / 2, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, p, W, H, W / 2, H / 2, false);
     reduce(&c, codes, got);
     for (int i = 0; i < W / 2 * H / 2; i++) {
         TEST_ASSERT_EQUAL_RGB(want, got[i]);
     }
-    make_cfg(&c, p, W, H, W / 2, H / 2, EPI_OUT_PREVIEW_NOMINAL);
+    make_cfg(&c, p, W, H, W / 2, H / 2, true);
     reduce(&c, codes, got);
     for (int i = 0; i < W / 2 * H / 2; i++) {
         TEST_ASSERT_EQUAL_RGB(want, got[i]);
@@ -484,7 +544,7 @@ void test_preview_reference(void) {
             codes[i] = HAND_INKS[xorshift32(&seed) % HAND_PANEL.ink_count].code;
         }
         epi_preview_config_t c;
-        make_cfg(&c, &HAND_PANEL, (uint16_t)sw, (uint16_t)sh, (uint16_t)dw, (uint16_t)dh, EPI_OUT_PREVIEW_MEASURED);
+        make_cfg(&c, &HAND_PANEL, (uint16_t)sw, (uint16_t)sh, (uint16_t)dw, (uint16_t)dh, false);
         reduce(&c, codes, got);
         const uint64_t total = (uint64_t)sw * sh;
         for (uint32_t j = 0; j < dh; j++) {
@@ -527,7 +587,7 @@ static uint8_t mix(const uint8_t* v, size_t nv, const uint8_t* codes, uint16_t n
     }
     const epi_panel_t p = {.name = "mix", .inks = inks, .ink_count = nv};
     epi_preview_config_t c;
-    make_cfg(&c, &p, n, 1, 1, 1, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &p, n, 1, 1, 1, false);
     epi_rgb_t got;
     reduce(&c, codes, &got);
     TEST_ASSERT_EQUAL_UINT8(got.r, got.g);
@@ -558,7 +618,7 @@ void test_preview_rounding_and_ties(void) {
 
 void test_preview_validation(void) {
     epi_preview_config_t ok;
-    make_cfg(&ok, &HAND_PANEL, 8, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&ok, &HAND_PANEL, 8, 6, 3, 2, false);
     const size_t size = epi_preview_workspace_size(&ok);
     TEST_ASSERT_NOT_EQUAL(0, size);
     uint8_t* ws = xmalloc(size);
@@ -568,23 +628,18 @@ void test_preview_validation(void) {
     const epi_panel_t zero_inks = {.name = "none", .inks = HAND_INKS, .ink_count = 0};
     const epi_panel_t null_inks = {.name = "none", .inks = NULL, .ink_count = 4};
 
-    epi_preview_config_t bad[16];
+    epi_preview_config_t bad[10];
     size_t n = 0;
-    make_cfg(&bad[n++], NULL, 8, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &no_inks, 8, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &zero_inks, 8, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &null_inks, 8, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 0, 6, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 0, 3, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 0, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 0, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 9, 2, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 7, EPI_OUT_PREVIEW_MEASURED);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 2, EPI_OUT_CODES8);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 2, EPI_OUT_PACKED4);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 2, EPI_OUT_PACKED2);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 2, EPI_OUT_PACKED1);
-    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 2, (epi_output_t)99);
+    make_cfg(&bad[n++], NULL, 8, 6, 3, 2, false);
+    make_cfg(&bad[n++], &no_inks, 8, 6, 3, 2, false);
+    make_cfg(&bad[n++], &zero_inks, 8, 6, 3, 2, false);
+    make_cfg(&bad[n++], &null_inks, 8, 6, 3, 2, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 0, 6, 3, 2, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 8, 0, 3, 2, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 0, 2, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 0, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 9, 2, false);
+    make_cfg(&bad[n++], &HAND_PANEL, 8, 6, 3, 7, false);
     TEST_ASSERT_TRUE(n <= sizeof bad / sizeof bad[0]);
     for (size_t i = 0; i < n; i++) {
         TEST_ASSERT_EQUAL_size_t(0, epi_preview_workspace_size(&bad[i]));
@@ -621,13 +676,13 @@ void test_preview_validation(void) {
 
     /* The extremes of the accepted range. */
     epi_preview_config_t edge;
-    make_cfg(&edge, &HAND_PANEL, 8, 6, 8, 6, EPI_OUT_PREVIEW_NOMINAL);
+    make_cfg(&edge, &HAND_PANEL, 8, 6, 8, 6, true);
     TEST_ASSERT_NOT_EQUAL(0, epi_preview_workspace_size(&edge));
-    make_cfg(&edge, &HAND_PANEL, 8, 6, 1, 1, EPI_OUT_PREVIEW_NOMINAL);
+    make_cfg(&edge, &HAND_PANEL, 8, 6, 1, 1, true);
     TEST_ASSERT_NOT_EQUAL(0, epi_preview_workspace_size(&edge));
-    make_cfg(&edge, &HAND_PANEL, 8, 6, 8, 1, EPI_OUT_PREVIEW_MEASURED); /* aspect ratio is free */
+    make_cfg(&edge, &HAND_PANEL, 8, 6, 8, 1, false); /* aspect ratio is free */
     TEST_ASSERT_NOT_EQUAL(0, epi_preview_workspace_size(&edge));
-    make_cfg(&edge, &HAND_PANEL, 65535, 65535, 65535, 65535, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&edge, &HAND_PANEL, 65535, 65535, 65535, 65535, false);
     TEST_ASSERT_NOT_EQUAL(0, epi_preview_workspace_size(&edge));
 
     free(ws);
@@ -643,7 +698,7 @@ void test_preview_invalid_code(void) {
         codes[i] = HAND_INKS[xorshift32(&seed) % HAND_PANEL.ink_count].code;
     }
     epi_preview_config_t c;
-    make_cfg(&c, &HAND_PANEL, SW, SH, DW, DH, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, SW, SH, DW, DH, false);
     epi_rgb_t want[DW * DH], got[DW * DH];
     reduce(&c, codes, want);
 
@@ -682,7 +737,7 @@ void test_preview_protocol(void) {
     uint8_t codes[W];
     memset(codes, WHITE, sizeof codes);
     epi_preview_config_t c;
-    make_cfg(&c, &HAND_PANEL, W, H, DW, DH, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, W, H, DW, DH, false);
     const size_t size = epi_preview_workspace_size(&c);
     void* ws = xmalloc(size);
     epi_preview_t* p = NULL;
@@ -726,7 +781,7 @@ void test_preview_drain_violation(void) {
     enum { W = 3, H = 3 };
     const uint8_t a[W] = {WHITE, BLACK, CYAN}, b[W] = {ROSE, ROSE, BLACK};
     epi_preview_config_t c;
-    make_cfg(&c, &HAND_PANEL, W, H, W, H, EPI_OUT_PREVIEW_MEASURED);
+    make_cfg(&c, &HAND_PANEL, W, H, W, H, false);
     const size_t size = epi_preview_workspace_size(&c);
     uint8_t* ws = xmalloc(size);
     epi_preview_t* p = NULL;
@@ -790,7 +845,7 @@ void test_preview_workspace_alignment(void) {
     }
     for (uint16_t dw = 1; dw <= MAX_DW; dw++) {
         epi_preview_config_t c;
-        make_cfg(&c, &HAND_PANEL, SW, SH, dw, DH, EPI_OUT_PREVIEW_MEASURED);
+        make_cfg(&c, &HAND_PANEL, SW, SH, dw, DH, false);
         epi_rgb_t want[MAX_DW * DH], got[MAX_DW * DH];
         reduce(&c, codes, want);
 

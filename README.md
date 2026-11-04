@@ -1,13 +1,14 @@
 # epaper-image
 
 A C11 library that converts images for e-paper panels. You give it rows of RGB
-and get back rows of panel ink codes, or an RGB preview. Images are rendered
-using the colours measured on the panel.
+and get back rows of panel ink codes. From those codes you can make an RGB preview
+and packed rows for the panel. Images are rendered using the colours measured on
+the panel.
 
 ## Features
 
-- **Streaming.** Push source rows in and pop panel rows out. You never need the
-  whole image or frame in memory.
+- **Streaming.** Push source rows in and pop rows of ink codes out. You never need
+  the whole image or frame in memory.
 - **No allocation.** The library never allocates memory. You provide the
   workspaces, and you can ask for their sizes up front.
 - **Deterministic.** Each pixel is processed with integer maths only, so the
@@ -22,8 +23,9 @@ using the colours measured on the panel.
   grain.
 - **Resizing to panel size.** Box, bilinear, bicubic and Lanczos3 filters in
   fixed point, with cover and fit layouts.
-- **Output formats.** One ink code per byte, packed at 4, 2 or 1 bits per
-  pixel, or an RGB preview in the inks' measured or nominal colours.
+- **Output formats.** The converter gives one ink code per byte. From those codes,
+  `epi_pack_row` makes rows packed at 4, 2 or 1 bits per pixel, and `epi_preview_*`
+  makes an RGB preview in the inks' measured or nominal colours.
 
 ## Supported panels
 
@@ -122,13 +124,12 @@ int convert(const epi_rgb_t* src, uint16_t src_w, uint16_t src_h, uint8_t* frame
     };
     epi_layout_cover(&rcfg); /* sets the source crop and the placement */
 
-    /* Converter: panel-sized rows in, packed ink codes out. */
+    /* Converter: panel-sized rows in, ink codes out. */
     epi_config_t ccfg = {
         .panel = panel,
         .intent = NULL, /* the panel's default preset */
         .width = panel->width,
         .height = panel->height,
-        .output = EPI_OUT_PACKED4,
     };
 
     /* Workspaces: the library never allocates. */
@@ -137,26 +138,32 @@ int convert(const epi_rgb_t* src, uint16_t src_w, uint16_t src_h, uint8_t* frame
     void* rmem = malloc(rsize);
     void* cmem = malloc(csize);
     epi_rgb_t* line = malloc(panel->width * sizeof *line);
-    if (rsize == 0 || csize == 0 || !rmem || !cmem || !line) goto done;
+    uint8_t* codes = malloc(panel->width);
+    if (rsize == 0 || csize == 0 || !rmem || !cmem || !line || !codes) goto done;
 
     epi_resampler_t* r;
     epi_converter_t* c;
     if (epi_resampler_init(&rcfg, rmem, rsize, &r) != EPI_OK) goto done;
     if (epi_converter_init(&ccfg, cmem, csize, &c) != EPI_OK) goto done;
 
-    size_t row_bytes = epi_output_row_size(ccfg.output, ccfg.width);
+    size_t row_bytes = epi_pack_row_size(EPI_PACK_4BPP, panel->width);
     uint8_t* out = frame;
 
-    /* Push source rows; after every push, drain both stages. */
+    /* Push source rows; after every push, drain both stages. Each row of ink
+     * codes is packed into the frame. */
     for (uint16_t y = 0; y < src_h; y++) {
         epi_resampler_push(r, src + (size_t)y * src_w);
         while (epi_resampler_pop(r, line) == EPI_OK) {
             epi_converter_push(c, line);
-            while (epi_converter_pop(c, out) == EPI_OK) out += row_bytes;
+            while (epi_converter_pop(c, codes) == EPI_OK) {
+                if (epi_pack_row(panel, EPI_PACK_4BPP, codes, panel->width, out) != EPI_OK) goto done;
+                out += row_bytes;
+            }
         }
     }
     rc = 0;
 done:
+    free(codes);
     free(line);
     free(cmem);
     free(rmem);
@@ -171,10 +178,11 @@ rows straight to the converter.
 
 ### One conversion, a preview and a frame
 
-An app that shows a preview on an LCD and sends the frame to the device needs to
-convert only once. Ask the converter for `EPI_OUT_CODES8` with the chosen preset,
-and keep the codes, as in this outline. The preview comes from `epi_preview_*`
-and the frame from `epi_pack_row`, both from those codes:
+A preview is a separate step from conversion. The converter gives ink codes, and
+both the preview and the frame come from those codes, so an app that shows a
+preview on an LCD and sends the frame to the device needs to convert only once.
+As each row of codes pops, push it to `epi_preview_*` and pack it with
+`epi_pack_row`, as in this outline:
 
 ```c
 epi_config_t ccfg = {
@@ -182,9 +190,9 @@ epi_config_t ccfg = {
     .intent = panel->presets[preset].intent,
     .width = panel->width,
     .height = panel->height,
-    .output = EPI_OUT_CODES8,
 };
-/* ...convert as above; `codes` receives panel->height rows of panel->width bytes... */
+/* ...set up the resampler and converter as above; `codes` holds one row of
+ * panel->width bytes... */
 
 /* The preview, in screen pixels. */
 epi_preview_config_t pcfg = {
@@ -193,26 +201,29 @@ epi_preview_config_t pcfg = {
     .src_height = panel->height,
     .dst_width = preview_w,
     .dst_height = preview_h,
-    .output = EPI_OUT_PREVIEW_MEASURED,
 };
 size_t size = epi_preview_workspace_size(&pcfg);
 void* mem = malloc(size);
 epi_preview_t* p;
 if (size == 0 || !mem || epi_preview_init(&pcfg, mem, size, &p) != EPI_OK) return -1;
-epi_rgb_t* out = preview;
-for (uint16_t y = 0; y < panel->height; y++) {
-    epi_preview_push(p, codes + (size_t)y * panel->width);
-    while (epi_preview_pop(p, out) == EPI_OK) out += preview_w;
-}
-free(mem);
+epi_rgb_t* pixels = preview;
 
 /* The frame for the panel. */
-size_t row_bytes = epi_output_row_size(EPI_OUT_PACKED4, panel->width);
-for (uint16_t y = 0; y < panel->height; y++) {
-    epi_pack_row(panel, EPI_OUT_PACKED4, codes + (size_t)y * panel->width, panel->width,
-                 frame + (size_t)y * row_bytes);
+size_t row_bytes = epi_pack_row_size(EPI_PACK_4BPP, panel->width);
+uint8_t* packed = frame;
+
+/* Where the converter is drained: */
+while (epi_converter_pop(c, codes) == EPI_OK) {
+    epi_preview_push(p, codes);
+    while (epi_preview_pop(p, pixels) == EPI_OK) pixels += preview_w;
+    if (epi_pack_row(panel, EPI_PACK_4BPP, codes, panel->width, packed) != EPI_OK) return -1;
+    packed += row_bytes;
 }
+free(mem); /* after the last row */
 ```
+
+An app can also keep the codes, `panel->height` rows of `panel->width` bytes, to
+make a preview at another size without converting again.
 
 Size the preview in screen pixels, not layout points: a preview 200 points wide on
 a 2x screen should be 400 pixels wide, because a smaller image visibly loses
@@ -245,9 +256,9 @@ Typical figures:
 
 | Configuration | Workspace |
 |---|---|
-| Colour (EL133UF1), 1200 wide | 193 KB |
-| Colour (EL133UF1), 1600 wide | 256 KB |
-| Grey (GDEY075T7), 800 wide | 88 KB |
+| Colour (EL133UF1), 1200 wide | 192 KB |
+| Colour (EL133UF1), 1600 wide | 255 KB |
+| Grey (GDEY075T7), 800 wide | 87 KB |
 | Resampler, 4000x3000 to 1200x1600 | 21 KB (box) to 102 KB (Lanczos3) |
 
 Converting a 1600x1200 image to a 1200x1600 colour frame with Lanczos3 takes
