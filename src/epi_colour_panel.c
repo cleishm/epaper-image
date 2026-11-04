@@ -446,19 +446,20 @@ static epi_err_t inks_hull(
     hull_t* h,
     epi_colour_tables_t* t,
     size_t* iw,
+    size_t* ib,
     double w[3],
     double b[3],
     const char** why
 ) {
     double xyz[EPI_MAX_INKS][3];
-    size_t ib = 0;
+    *ib = 0;
     *iw = 0;
     for (size_t i = 0; i < n; i++) {
         double lin[3];
         ink_linear(&inks[i], lin);
         mat3_vec(&M_SRGB, lin, xyz[i]);
         *iw = xyz[i][1] > xyz[*iw][1] ? i : *iw;
-        ib = xyz[i][1] < xyz[ib][1] ? i : ib;
+        *ib = xyz[i][1] < xyz[*ib][1] ? i : *ib;
     }
     const epi_err_t err = hull_build(xyz, n, h, why);
     if (err != EPI_OK) {
@@ -466,7 +467,7 @@ static epi_err_t inks_hull(
     }
     hull_quantise(h, xyz, n, t);
     memcpy(w, xyz[*iw], sizeof xyz[0]);
-    memcpy(b, xyz[ib], sizeof xyz[0]);
+    memcpy(b, xyz[*ib], sizeof xyz[0]);
     return EPI_OK;
 }
 
@@ -505,20 +506,25 @@ epi_err_t epi_colour_tables_derive(
     void* progress_ctx
 ) {
     hull_t h;
-    size_t iw;
+    size_t iw, ib;
     double w[3], b[3];
-    const epi_err_t err = inks_hull(inks, n, &h, t, &iw, w, b, why);
+    const epi_err_t err = inks_hull(inks, n, &h, t, &iw, &ib, w, b, why);
     if (err != EPI_OK) {
         return err;
     }
-    /* The white ink is the lightest measured; the nominal colours must agree. */
-    double nominal_y_max = 0.0;
+    /* White and black are the lightest and darkest measured; the nominal colours
+     * must agree. */
+    double nominal_y_max = 0.0, nominal_y_min = 1.0;
     for (size_t i = 0; i < n; i++) {
         const double y = nominal_y(&inks[i]);
         nominal_y_max = y > nominal_y_max ? y : nominal_y_max;
+        nominal_y_min = y < nominal_y_min ? y : nominal_y_min;
     }
     if (nominal_y(&inks[iw]) < nominal_y_max) {
         return reject(why, "lightest measured ink is not the white ink");
+    }
+    if (nominal_y(&inks[ib]) > nominal_y_min) {
+        return reject(why, "darkest measured ink is not the black ink");
     }
     t->base.kind = EPI_PANEL_COLOUR;
     t->base.ink_count = (uint8_t)n;

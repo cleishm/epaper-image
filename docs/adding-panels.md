@@ -288,7 +288,9 @@ the same checks, reject them, with a reason:
   axis from the darkest to the lightest ink must run through it.
 - The neutral range's darkest L\* must be at least 0 and below 66.29.
 - The ink with the largest measured Y is the white ink, and its nominal Y must
-  not be below any other ink's. All nominal colours zero, or all equal, skip this.
+  not be below any other ink's. Likewise the ink with the smallest measured Y is the
+  black ink, and its nominal Y must not be above any other ink's. All nominal colours
+  zero, or all equal, skip both.
 - The black ink's Y must be at least 0 and below the white ink's, and the white
   ink's X, Y and Z must each be above 0.008 (Y = 1 is diffuse white). None of the
   white ink's red, green and blue may be 0.

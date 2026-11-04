@@ -823,6 +823,9 @@ integer arithmetic in range:
 - W's nominal Y is the largest of the inks' nominal Y. Zero or equal nominals pass.
   W is the lightest measured ink, so a pale ink measured lighter than the real white
   would otherwise take its place, and source white would render in that ink.
+- B's nominal Y is the smallest of the inks' nominal Y, likewise: a dark, near-neutral
+  ink measured darker than the real black would take its place, and source black would
+  render in that ink. A strongly tinted one is rejected anyway, by the cusp margin.
 - W's X, Y and Z are above 512 in Q16, so that W's reciprocal fits int32; B's Y is
   below W's in Q16.
 - W has no zero channel: `lin_to_lms` divides by each.

@@ -302,9 +302,10 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *         first, then @p storage and @p out), a zero size, an ink count outside
  *         5..16, sigma outside (0, 10.5], or inks that can't make a panel: inks
  *         not spanning three dimensions; a white ink (the largest measured Y)
- *         whose nominal Y is below another ink's; a white ink with X, Y or Z at
- *         or below 512/65536, or with a zero channel in linear sRGB; a black
- *         ink (the smallest Y) not below white's Y; an ink with twice or more of
+ *         whose nominal Y is below another ink's; a black ink (the smallest
+ *         measured Y) whose nominal Y is above another ink's; a white ink with
+ *         X, Y or Z at or below 512/65536, or with a zero channel in linear sRGB;
+ *         a black ink not below white's Y; an ink with twice or more of
  *         a cone response of the white ink's; a neutral axis, the line through
  *         the origin and white, that misses the hull; a neutral range whose
  *         darkest L* is below 0 or 66.29 or more, or that spans under 1 L*; a
