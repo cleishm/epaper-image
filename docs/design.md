@@ -10,7 +10,7 @@ behind it computes and why.
 
 ## Overview
 
-The library is two streaming objects, both living entirely in caller-provided
+The library is three streaming objects, all living entirely in caller-provided
 memory:
 
 - the **resampler** (`src/epi_resampler.c`) takes source rows of 8-bit sRGB
@@ -18,14 +18,16 @@ memory:
   and placed on a background;
 - the **converter** (`src/epi_converter.c`) takes panel-sized rows of 8-bit
   sRGB and produces panel rows: ink codes (one per byte or packed 4, 2 or 1
-  bits per pixel) or an RGB preview of what the panel will show.
+  bits per pixel) or an RGB preview of what the panel will show;
+- the **preview reducer** (`src/epi_preview.c`) takes rows of ink codes and
+  produces an RGB preview of a smaller size.
 
 A caller pushes each source row into the resampler, pushes every row the
 resampler pops into the converter, and writes every row the converter pops
-to the panel. Both objects never allocate, validate everything in init, and
-run integer-only per-pixel loops; the only floating point after init is the
-resampler's vertical weights, computed in deterministic double once per
-output row.
+to the panel. All three objects never allocate, validate their configuration
+in init, and run integer-only per-pixel loops; the only floating point after
+init is the resampler's vertical weights, computed in deterministic double once
+per output row.
 
 Inside the converter the work is split into stages that the code's comments
 label S1 to S7:
@@ -1175,3 +1177,47 @@ The **measured** preview shows what the panel will display, in the measured
 colours that drove the dithering, so it is the honest preview of the
 result; the **nominal** preview uses the inks' ideal colours, for consumers
 that identify inks by those colours.
+
+`epi_pack_row` writes the packed formats from a row of `EPI_OUT_CODES8` codes,
+byte-identical to the converter's, so one conversion can give both a preview
+and a frame.
+
+### Preview reduction
+
+The reducer (`src/epi_preview.c`) converts rows of `EPI_OUT_CODES8` codes to
+smaller RGB888 rows, in the inks' measured or nominal colours. Each side can be
+any size from 1 up to the source's.
+
+Each preview pixel is the area average of its source pixels in linear light,
+which is what the eye does to fine dither at a distance. Averaging sRGB values
+makes dithered areas too dark: equal black and white dots give 128, not 188.
+Dithering at the preview's size would give coarser dots than the panel's.
+
+All arithmetic is integer, so the output is identical on every target:
+
+- **Weights.** On one axis, source pixel i covers [i·dst, (i+1)·dst) and preview
+  pixel j covers [j·src, (j+1)·src). The weight is their overlap.
+- **Sum.** For each preview pixel and channel, a `uint64_t` sums
+  linear × x weight × y weight, where linear is the ink's sRGB8 through
+  `epi_srgb_to_lin_q16` (at most 2^16). The total weight is
+  src_width·src_height, below 2^32, so the sum fits.
+- **Mean.** The sum divided by the total weight, rounded to nearest, halves up.
+- **sRGB8.** The nearest entry in `epi_srgb_to_lin_q16`, by binary search. An
+  exact midpoint takes the lower entry.
+
+The table is strictly increasing, so one ink alone returns its exact sRGB8, and a
+preview the size of the source equals the converter's preview output.
+
+Since dst ≤ src, one source row finishes at most one preview row. The rest of
+that source row starts the next. Pushes follow the converter's contract. A row
+with a code outside the panel's inks is rejected with no change of state.
+
+The workspace depends only on the preview's width:
+
+| block | size |
+|---|---|
+| state, incl. a linear colour and validity flag per code | about 3.4 KB |
+| sums | dst_width·3·8 B |
+| finished row | dst_width·3 B |
+
+A preview 300 wide needs 11,487 B where alignment is 8 bytes.

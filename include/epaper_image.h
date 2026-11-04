@@ -4,7 +4,8 @@
  *
  * Streaming resampling of RGB rows to panel size, followed by tone
  * adjustment, dynamic-range compression, palette matching and error
- * diffusion to panel ink codes.
+ * diffusion to panel ink codes. Rows of ink codes can then be reduced to a
+ * preview and packed for the panel.
  */
 
 #ifndef EPAPER_IMAGE_H
@@ -21,9 +22,9 @@ extern "C" {
 /** @brief Library major version. */
 #define EPI_VERSION_MAJOR 0
 /** @brief Library minor version. */
-#define EPI_VERSION_MINOR 1
+#define EPI_VERSION_MINOR 2
 /** @brief Library patch version. */
-#define EPI_VERSION_PATCH 1
+#define EPI_VERSION_PATCH 0
 
 /**
  * @brief Error codes returned by library functions.
@@ -472,6 +473,109 @@ void epi_layout_cover(epi_resampler_config_t* cfg);
  * the resampler does.
  */
 void epi_layout_fit(epi_resampler_config_t* cfg);
+
+/* ---- Preview reducer: ink-code rows in, smaller RGB rows out ------------- */
+
+/**
+ * @brief Preview reducer configuration.
+ *
+ * The reducer averages an image of ink codes down to a preview in linear light,
+ * so fine dither keeps the brightness it has on the panel. On each axis, source
+ * pixel i covers [i·dst, (i+1)·dst) and preview pixel j covers
+ * [j·src, (j+1)·src). A preview pixel is the mean of its source pixels' linear
+ * colours (each ink's sRGB8 colour through the sRGB EOTF, Q16), weighted by the
+ * exact integer overlaps and rounded to the nearest integer, halves up. Its
+ * value is the sRGB8 code nearest in linear light; a mean midway between two
+ * codes takes the lower. A block of one ink gives exactly that ink's colour, and
+ * a preview the size of the source equals the converter's preview output. No
+ * floating point is used, so the output is byte-identical on every platform.
+ */
+typedef struct {
+    /** Supplies the inks' colours; read only by epi_preview_init(). */
+    const epi_panel_t* panel;
+    /** Size of the ink-code image in pixels, each ≥ 1. */
+    uint16_t src_width, src_height;
+    /** Size of the preview in pixels, each from 1 up to the source's. The axes
+     *  are independent, so the aspect ratio may change. */
+    uint16_t dst_width, dst_height;
+    /** #EPI_OUT_PREVIEW_MEASURED or #EPI_OUT_PREVIEW_NOMINAL. */
+    epi_output_t output;
+} epi_preview_config_t;
+
+/** @brief Preview reducer state (opaque; lives in the caller's workspace). */
+typedef struct epi_preview epi_preview_t;
+
+/**
+ * @brief Workspace bytes needed for @p cfg, or 0 if @p cfg is invalid.
+ *
+ * Depends on dst_width only: about 3.4 KB of state, mostly a table of the inks'
+ * linear colours, and 27 bytes per preview column. Includes alignment slack, so
+ * any workspace pointer may be passed to epi_preview_init().
+ */
+size_t epi_preview_workspace_size(const epi_preview_config_t* cfg);
+
+/**
+ * @brief Initialise a preview reducer in caller-provided memory.
+ *
+ * The library never allocates; the workspace holds the whole reducer and must
+ * outlive it. The workspace needs no particular alignment or contents.
+ *
+ * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer, a panel with no inks,
+ *         a zero size, a preview larger than the source on either axis, or an
+ *         output other than the two preview formats;
+ *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
+ *         epi_preview_workspace_size(). @p *out is NULL on error.
+ */
+epi_err_t epi_preview_init(const epi_preview_config_t* cfg, void* workspace, size_t size, epi_preview_t** out);
+
+/**
+ * @brief Push the next row of @c src_width ink codes (as #EPI_OUT_CODES8 gives
+ *        them), top to bottom.
+ *
+ * One push finishes at most one preview row. A row holding a code that is not
+ * one of the panel's inks is rejected and leaves the reducer unchanged.
+ *
+ * Contract: call epi_preview_pop() until it stops returning EPI_OK after every
+ * push. A push while a finished row is undrained is a programming error: it
+ * asserts in debug builds and is rejected (no memory is touched, push returns
+ * EPI_ERR_NOT_DRAINED) otherwise. Pushes after @c src_height rows return
+ * EPI_ERR_FINISHED, without asserting.
+ *
+ * @return EPI_OK if the row was accepted; EPI_ERR_INVALID_ARG for a NULL
+ *         argument or a code that is not one of the panel's inks;
+ *         EPI_ERR_FINISHED for a push past the last source row;
+ *         EPI_ERR_NOT_DRAINED for a push rejected because a finished row was
+ *         not drained.
+ */
+epi_err_t epi_preview_push(epi_preview_t* p, const uint8_t* codes);
+
+/**
+ * @brief Pop the next preview row (@c dst_width pixels), if one is ready.
+ *
+ * @return EPI_OK if a row was written; EPI_ERR_INVALID_ARG for a NULL argument;
+ *         EPI_ERR_FINISHED if all @c dst_height rows have been popped;
+ *         EPI_ERR_NOT_READY if none is ready yet.
+ */
+epi_err_t epi_preview_pop(epi_preview_t* p, epi_rgb_t* dst_row);
+
+/* ---- Packer: ink-code rows in, panel rows out ---------------------------- */
+
+/**
+ * @brief Pack one row of ink codes (as #EPI_OUT_CODES8 gives them) for the panel.
+ *
+ * Stateless. The bytes are those a converter writes in @p output for the same
+ * codes: @p out_row receives epi_output_row_size() bytes, and a partial last
+ * byte is padded with the code of the panel's lightest ink. Nothing is written
+ * on error.
+ *
+ * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer, a zero width, a panel
+ *         with no inks, an @p output other than #EPI_OUT_PACKED4,
+ *         #EPI_OUT_PACKED2 or #EPI_OUT_PACKED1, or a code too wide for the
+ *         format, whether in @p codes or among the panel's inks (which a
+ *         converter also rejects, at init).
+ */
+epi_err_t
+epi_pack_row(const epi_panel_t* panel, epi_output_t output, const uint8_t* codes, uint16_t width, void* out_row);
 
 #ifdef __cplusplus
 }

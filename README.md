@@ -84,7 +84,7 @@ include(FetchContent)
 FetchContent_Declare(
     epaper_image
     GIT_REPOSITORY https://github.com/cleishm/epaper-image.git
-    GIT_TAG v0.1.1
+    GIT_TAG v0.2.0
 )
 FetchContent_MakeAvailable(epaper_image)
 
@@ -169,10 +169,74 @@ come out later than the input rows that produce them, and the last push releases
 the rest. If an image is already panel-sized, skip the resampler and push its
 rows straight to the converter.
 
+### One conversion, a preview and a frame
+
+An app that shows a preview on an LCD and sends the frame to the device needs to
+convert only once. Ask the converter for `EPI_OUT_CODES8` with the chosen preset,
+and keep the codes, as in this outline. The preview comes from `epi_preview_*`
+and the frame from `epi_pack_row`, both from those codes:
+
+```c
+epi_config_t ccfg = {
+    .panel = panel,
+    .intent = panel->presets[preset].intent,
+    .width = panel->width,
+    .height = panel->height,
+    .output = EPI_OUT_CODES8,
+};
+/* ...convert as above; `codes` receives panel->height rows of panel->width bytes... */
+
+/* The preview, in screen pixels. */
+epi_preview_config_t pcfg = {
+    .panel = panel,
+    .src_width = panel->width,
+    .src_height = panel->height,
+    .dst_width = preview_w,
+    .dst_height = preview_h,
+    .output = EPI_OUT_PREVIEW_MEASURED,
+};
+size_t size = epi_preview_workspace_size(&pcfg);
+void* mem = malloc(size);
+epi_preview_t* p;
+if (size == 0 || !mem || epi_preview_init(&pcfg, mem, size, &p) != EPI_OK) return -1;
+epi_rgb_t* out = preview;
+for (uint16_t y = 0; y < panel->height; y++) {
+    epi_preview_push(p, codes + (size_t)y * panel->width);
+    while (epi_preview_pop(p, out) == EPI_OK) out += preview_w;
+}
+free(mem);
+
+/* The frame for the panel. */
+size_t row_bytes = epi_output_row_size(EPI_OUT_PACKED4, panel->width);
+for (uint16_t y = 0; y < panel->height; y++) {
+    epi_pack_row(panel, EPI_OUT_PACKED4, codes + (size_t)y * panel->width, panel->width,
+                 frame + (size_t)y * row_bytes);
+}
+```
+
+Size the preview in screen pixels, not layout points: a preview 200 points wide on
+a 2x screen should be 400 pixels wide, because a smaller image visibly loses
+detail. A preview needn't be larger than the panel, and the reducer doesn't
+enlarge. Sides from 1 up to the panel's are accepted, on each axis, at any ratio.
+
+Reduce with `epi_preview_*` rather than an ordinary image scaler. A scaler averages
+sRGB values, which makes dithered areas too dark: equal black and white dots give
+128 rather than the correct 188. The reducer averages in linear light, as the eye
+does at a distance.
+
+The library doesn't rotate, because a quarter turn needs the whole frame in memory.
+To display in an orientation other than the panel's native one, do these steps in
+order:
+
+1. Convert in the display orientation. A quarter turn swaps width and height.
+2. Make the preview from those codes, so that it comes out upright.
+3. Rotate the codes to the panel's native layout.
+4. Pack them into the frame.
+
 ## Memory and performance
 
-The library never allocates memory. Converters and resamplers run in workspaces
-you provide and work row by row, so no workspace has to hold a whole image. A
+The library never allocates memory. Converters, resamplers and preview reducers
+run in workspaces you provide and work row by row, so no workspace has to hold a whole image. A
 converter's workspace size depends only on the panel and width. A resampler's
 also grows with the source size, because shrinking an image reads more source
 pixels for each output pixel. `epi_converter_workspace_size`,
@@ -241,7 +305,8 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
   or individual intent values (`--preset`, `--tone`, `--detail`, `--adapt`,
   `--vibrance`, `--veil`), the layout (`--cover` or `--fit` with
   `--background`), the resampling filter and rotation, and can save a preview
-  PNG of what the panel will show (`--preview`, `--nominal`). `--compare` puts
+  PNG of what the panel will show (`--preview`, `--nominal`), at a fraction of
+  the shown size with `--preview-scale`. `--compare` puts
   two to four versions into labelled cells of one frame for blind comparison.
   Run `convert --help` for the full list. It is built when
   `EPAPER_IMAGE_BUILD_TOOLS` is on. It is a development tool and shouldn't be

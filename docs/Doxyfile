@@ -6,7 +6,7 @@
 
 DOXYFILE_ENCODING      = UTF-8
 PROJECT_NAME           = "epaper-image"
-PROJECT_NUMBER         = "0.1.1"
+PROJECT_NUMBER         = "0.2.0"
 PROJECT_BRIEF          = "Image conversion for e-paper panels"
 PROJECT_LOGO           =
 OUTPUT_DIRECTORY       = .

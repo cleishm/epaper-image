@@ -34,15 +34,6 @@
 #include <stdint.h>
 #include <string.h>
 
-/* What max_align_t covers; MSVC's C mode does not define it. */
-typedef union {
-    long long ll;
-    long double ld;
-    void* p;
-} ws_align_t;
-
-#define EPI_WS_ALIGN ((size_t)_Alignof(ws_align_t))
-
 struct epi_converter {
     const epi_panel_tables_t* tables;
     uint16_t width, height;
@@ -60,10 +51,6 @@ struct epi_converter {
     epi_intent_ctx_t intent;
     epi_dither_ctx_t dither;
 };
-
-static size_t align_up(size_t n) {
-    return (n + EPI_WS_ALIGN - 1) & ~(EPI_WS_ALIGN - 1);
-}
 
 /* Tables as panelgen or epi_grey_panel_init builds them, so the intent and the
  * ditherer can rely on them.
@@ -161,13 +148,13 @@ static ws_layout_t layout(const epi_config_t* cfg) {
     const size_t w = cfg->width, r = cfg->panel->tables->kernel_radius;
     const bool grey = cfg->panel->tables->kind == EPI_PANEL_GREY;
     ws_layout_t l;
-    l.conv = align_up(sizeof(struct epi_converter));
-    l.err = align_up(epi_dither_err_size(cfg->panel->tables, cfg->width));
-    l.target = align_up(w * (grey ? 1 : 3) * sizeof(int32_t));
-    l.hblur = align_up((2 * r + 1) * w * sizeof(int16_t));
-    l.scratch = align_up(w * sizeof(int16_t));
-    l.source = align_up((r + 1) * w * (grey ? sizeof(int16_t) : sizeof(epi_rgb_t)));
-    l.idx = align_up(w);
+    l.conv = epi_align_up(sizeof(struct epi_converter));
+    l.err = epi_align_up(epi_dither_err_size(cfg->panel->tables, cfg->width));
+    l.target = epi_align_up(w * (grey ? 1 : 3) * sizeof(int32_t));
+    l.hblur = epi_align_up((2 * r + 1) * w * sizeof(int16_t));
+    l.scratch = epi_align_up(w * sizeof(int16_t));
+    l.source = epi_align_up((r + 1) * w * (grey ? sizeof(int16_t) : sizeof(epi_rgb_t)));
+    l.idx = epi_align_up(w);
     return l;
 }
 

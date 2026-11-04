@@ -17,6 +17,7 @@
 #ifndef EPI_MATH_H
 #define EPI_MATH_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -129,6 +130,20 @@ double epi_sin_d(double x);
 /* p rounded up to a multiple of a. */
 static inline void* epi_align_ptr(void* p, size_t a) {
     return (uint8_t*)p + (a - (uintptr_t)p % a) % a;
+}
+
+/* What max_align_t covers; MSVC's C mode does not define it. */
+typedef union {
+    long long ll;
+    long double ld;
+    void* p;
+} ws_align_t;
+
+#define EPI_WS_ALIGN ((size_t)_Alignof(ws_align_t))
+
+/* n rounded up to a multiple of EPI_WS_ALIGN. */
+static inline size_t epi_align_up(size_t n) {
+    return (n + EPI_WS_ALIGN - 1) & ~(EPI_WS_ALIGN - 1);
 }
 
 /* Exact bit access to a double (the bit pattern as uint64, and back). */

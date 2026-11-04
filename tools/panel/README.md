@@ -66,6 +66,7 @@ PY=tools/panel/.venv/bin/python
 CONVERT=build/tools/convert/convert
 $CONVERT --preset Soft --preview preview.png photo.jpg frame.bin   # portrait
 $CONVERT --rotate photo.jpg frame.bin                              # landscape
+$CONVERT --preview small.png --preview-scale 0.25 photo.jpg frame.bin   # with a quarter-size preview
 $PY tools/panel/send.py frame frame.bin
 $PY tools/panel/send.py test                       # six ink bars
 $PY tools/panel/send.py --out wire.bin frame frame.bin   # check only, don't send
