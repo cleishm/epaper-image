@@ -15,7 +15,7 @@ from .colour import srgb8_to_xyz
 # iPhone 16 Pro ProRAW close-ups IMG_3544-3547 of the chart-1 screen,
 # 2026-10-28, registered to panel pixels and flat-fielded; each ink is the
 # mean over solid single-ink pixels (5x5-solid in the ink map) of the four
-# close-ups, converted with the DNG's own camera matrix, its Lab relative to
+# close-ups, converted with the DNG's own camera matrix, its CIELAB relative to
 # the white ink kept and re-expressed against a white of (190, 200, 200).
 # A camera is not a colorimeter: the luminance ratios (Y / Y_white: black
 # 0.084, yellow 0.877, red 0.138, blue 0.263, green 0.316) are more

@@ -36,7 +36,7 @@ struct epi_panel_tables {
 /* Colour panels. XYZ is relative to source white Y = 1. */
 typedef struct {
     epi_panel_tables_t base;
-    int32_t white_xyz[3];             /* Q16: white ink, also the Lab reference white */
+    int32_t white_xyz[3];             /* Q16: white ink, also the CIELAB reference white */
     int32_t black_xyz[3];             /* Q16: black ink (B_ink) */
     int32_t lin_to_panel_adapt[3][3]; /* Q16: diag(k)·A·M_srgb (the D = 1 part of the panel model) */
     int32_t lin_to_panel_bpc[3][3];   /* Q16: (W_y − B_y)·M_srgb (the D = 0 part of the panel model) */
