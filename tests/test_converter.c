@@ -1,7 +1,7 @@
 /*
  * Tests for the streaming converter (src/epi_converter.c): validation,
- * workspace, push/pop lag and flush, output formats, streaming == whole
- * image, and regression goldens.
+ * workspace, push/pop lag and flush, what its codes pack and preview as,
+ * streaming == whole image, and regression goldens.
  */
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200809L /* fork, waitpid, _exit for the death test */
@@ -81,9 +81,9 @@ static void reference_indices(const epi_intent_t* intent, const epi_rgb_t* img, 
     free(ctx);
 }
 
-/* CODES8 output of the converter equals the whole-image reference. */
+/* The converter's codes equal the whole-image reference. */
 static void check_streaming_equals_whole(const epi_intent_t* intent, const epi_rgb_t* img, int w, int h) {
-    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h);
     cfg.intent = intent;
     size_t n = (size_t)w * h;
     uint8_t* codes = xmalloc(n);
@@ -117,7 +117,7 @@ static void check_streaming_equals_whole(const epi_intent_t* intent, const epi_r
 /* ---- tests ----------------------------------------------------------------- */
 
 void test_converter_validation(void) {
-    epi_config_t cfg = config(panel(), 16, 8, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), 16, 8);
     size_t size = epi_converter_workspace_size(&cfg);
     TEST_ASSERT_NOT_EQUAL(0, size);
     void* ws = xmalloc(size);
@@ -142,7 +142,7 @@ void test_converter_validation(void) {
     no_presets.presets = NULL;
     no_presets.preset_count = 0;
 
-    epi_config_t bad[11];
+    epi_config_t bad[8];
     int nbad = 0;
     bad[nbad] = cfg, bad[nbad++].width = 0;
     bad[nbad] = cfg, bad[nbad++].height = 0;
@@ -152,9 +152,6 @@ void test_converter_validation(void) {
     bad[nbad] = cfg, bad[nbad++].panel = &ink_mismatch;
     bad[nbad] = cfg, bad[nbad++].panel = &too_many;
     bad[nbad] = cfg, bad[nbad++].panel = &no_presets; /* intent NULL needs presets[0] */
-    bad[nbad] = cfg, bad[nbad++].output = (epi_output_t)99;
-    bad[nbad] = cfg, bad[nbad++].output = EPI_OUT_PACKED2; /* EL133UF1 codes reach 6 */
-    bad[nbad] = cfg, bad[nbad++].output = EPI_OUT_PACKED1;
     for (int i = 0; i < nbad; i++) {
         TEST_ASSERT_EQUAL_size_t_MESSAGE(0, epi_converter_workspace_size(&bad[i]), "size");
         c = (epi_converter_t*)ws;
@@ -185,30 +182,15 @@ void test_converter_validation(void) {
         TEST_ASSERT_NULL(c);
     }
 
-    /* Packed formats with codes that fit. */
+    /* Any code is fine: only epi_pack_row limits their width. */
     epi_ink_t inks[EPI_MAX_INKS];
     memcpy(inks, panel()->inks, panel()->ink_count * sizeof inks[0]);
-    for (size_t i = 0; i < panel()->ink_count; i++) {
-        inks[i].code = (uint8_t)(i & 1);
-    }
-    epi_panel_t small_codes = *panel();
-    small_codes.inks = inks;
+    inks[3].code = 16;
+    epi_panel_t wide_codes = *panel();
+    wide_codes.inks = inks;
     epi_config_t pk = cfg;
-    pk.panel = &small_codes;
-    for (int o = EPI_OUT_PACKED4; o <= EPI_OUT_PACKED1; o++) {
-        pk.output = (epi_output_t)o;
-        TEST_ASSERT_NOT_EQUAL(0, epi_converter_workspace_size(&pk));
-        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(&pk, ws, size, &c));
-    }
-    inks[3].code = 2; /* fits PACKED2 only */
-    pk.output = EPI_OUT_PACKED2;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(&pk, ws, size, &c));
-    pk.output = EPI_OUT_PACKED1;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_init(&pk, ws, size, &c));
-    inks[3].code = 16; /* too wide for PACKED4 */
-    pk.output = EPI_OUT_PACKED4;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_init(&pk, ws, size, &c));
-    pk.output = EPI_OUT_CODES8;
+    pk.panel = &wide_codes;
+    TEST_ASSERT_NOT_EQUAL(0, epi_converter_workspace_size(&pk));
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(&pk, ws, size, &c));
 
     /* NULL converter / row: invalid argument. */
@@ -222,24 +204,11 @@ void test_converter_validation(void) {
     free(ws);
 }
 
-void test_converter_row_size(void) {
-    TEST_ASSERT_EQUAL_size_t(7, epi_output_row_size(EPI_OUT_CODES8, 7));
-    TEST_ASSERT_EQUAL_size_t(4, epi_output_row_size(EPI_OUT_PACKED4, 7));
-    TEST_ASSERT_EQUAL_size_t(2, epi_output_row_size(EPI_OUT_PACKED2, 7));
-    TEST_ASSERT_EQUAL_size_t(1, epi_output_row_size(EPI_OUT_PACKED1, 7));
-    TEST_ASSERT_EQUAL_size_t(2, epi_output_row_size(EPI_OUT_PACKED1, 9));
-    TEST_ASSERT_EQUAL_size_t(21, epi_output_row_size(EPI_OUT_PREVIEW_MEASURED, 7));
-    TEST_ASSERT_EQUAL_size_t(21, epi_output_row_size(EPI_OUT_PREVIEW_NOMINAL, 7));
-    TEST_ASSERT_EQUAL_size_t(600, epi_output_row_size(EPI_OUT_PACKED4, 1200));
-    TEST_ASSERT_EQUAL_size_t(0, epi_output_row_size((epi_output_t)99, 7));
-    TEST_ASSERT_EQUAL_size_t(0, epi_output_row_size(EPI_OUT_CODES8, 0));
-}
-
 /* Corrupt tables are refused up front: size 0 and INVALID_ARG. */
 static void check_tables(const epi_panel_t* base, const epi_panel_tables_t* t, bool valid, const char* what) {
     epi_panel_t p = *base;
     p.tables = t;
-    epi_config_t cfg = config(&p, 16, 8, EPI_OUT_CODES8);
+    epi_config_t cfg = config(&p, 16, 8);
     const size_t cap = 64 * 1024;
     void* ws = xmalloc(cap);
     epi_converter_t* c = (epi_converter_t*)ws;
@@ -322,7 +291,7 @@ void test_converter_corrupt_tables(void) {
 }
 
 void test_converter_workspace(void) {
-    epi_config_t cfg = config(panel(), 1, 10, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), 1, 10);
     size_t prev = 0;
     for (unsigned w = 1; w <= 2048; w += (w < 64 ? 1 : 61)) {
         cfg.width = (uint16_t)w;
@@ -337,12 +306,12 @@ void test_converter_workspace(void) {
     TEST_ASSERT_TRUE(epi_converter_workspace_size(&cfg) > prev);
 
     /* Too small by one byte fails at any alignment; exact size works at any alignment. */
-    cfg = config(panel(), 37, 5, EPI_OUT_PACKED4);
+    cfg = config(panel(), 37, 5);
     size_t size = epi_converter_workspace_size(&cfg);
     uint8_t* buf = xmalloc(size + 64);
     epi_rgb_t img[37 * 5];
     fill_noise(img, 37 * 5, 7);
-    uint8_t ref[19 * 5], out[19 * 5];
+    uint8_t ref[37 * 5], out[37 * 5];
     TEST_ASSERT_EQUAL_INT(5, run_converter(&cfg, img, ref, NULL));
     for (int off = 0; off < 32; off++) {
         epi_converter_t* c = (epi_converter_t*)buf;
@@ -397,7 +366,7 @@ void test_converter_null_intent_is_default(void) {
     fill_gradient(img, w, h);
     uint8_t* a = xmalloc((size_t)w * h);
     uint8_t* b = xmalloc((size_t)w * h);
-    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h);
     run_converter(&cfg, img, a, NULL);
     epi_intent_t def = *panel()->presets[0].intent; /* a copy: equal by value, not pointer */
     cfg.intent = &def;
@@ -411,7 +380,8 @@ void test_converter_null_intent_is_default(void) {
     free(img);
 }
 
-/* Every format against CODES8 of the same input, at odd widths. */
+/* Each packed format and preview of the codes against the same input, at odd
+ * widths. */
 void test_converter_formats(void) {
     const epi_panel_t* p = panel();
     /* The lightest EL133UF1 ink is white (index 1, code 1). */
@@ -443,7 +413,8 @@ void test_converter_formats(void) {
         fill_noise(img, (size_t)w * h, (uint32_t)(w * 7 + 1));
         uint8_t* codes = xmalloc((size_t)w * h);
         uint8_t* out = xmalloc((size_t)w * h * 3);
-        epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+        uint8_t* panel_codes = xmalloc((size_t)w * h);
+        epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h);
         run_converter(&cfg, img, codes, NULL);
         uint8_t idx[32 * 23];
         for (int i = 0; i < w * h; i++) {
@@ -453,22 +424,24 @@ void test_converter_formats(void) {
         }
 
         struct {
-            epi_output_t out;
+            epi_pack_format_t format;
             const epi_panel_t* panel;
             unsigned bits;
             uint8_t pad;
         } packs[] = {
-            {EPI_OUT_PACKED4, p, 4, pad_el},
-            {EPI_OUT_PACKED2, &p2, 2, inks2[1].code},
-            {EPI_OUT_PACKED1, &p1, 1, inks1[1].code},
+            {EPI_PACK_4BPP, p, 4, pad_el},
+            {EPI_PACK_2BPP, &p2, 2, inks2[1].code},
+            {EPI_PACK_1BPP, &p1, 1, inks1[1].code},
         };
         for (size_t k = 0; k < 3; k++) {
-            cfg = config(panel(), (uint16_t)w, (uint16_t)h, packs[k].out);
-            cfg.panel = packs[k].panel;
-            const size_t rs = epi_output_row_size(packs[k].out, (uint16_t)w);
-            run_converter(&cfg, img, out, NULL);
+            cfg = config(packs[k].panel, (uint16_t)w, (uint16_t)h);
+            const size_t rs = epi_pack_row_size(packs[k].format, (uint16_t)w);
+            run_converter(&cfg, img, panel_codes, NULL);
             const unsigned per = 8 / packs[k].bits;
             for (int y = 0; y < h; y++) {
+                TEST_ASSERT_EQUAL_INT(
+                    EPI_OK, epi_pack_row(packs[k].panel, packs[k].format, panel_codes + (size_t)y * w, (uint16_t)w, out)
+                );
                 for (size_t b = 0; b < rs; b++) {
                     unsigned v = 0;
                     for (unsigned j = 0; j < per; j++) {
@@ -476,20 +449,20 @@ void test_converter_formats(void) {
                         unsigned code = x < (size_t)w ? packs[k].panel->inks[idx[y * w + x]].code : packs[k].pad;
                         v = (v << packs[k].bits) | code;
                     }
-                    TEST_ASSERT_EQUAL_HEX8(v, out[y * rs + b]);
+                    TEST_ASSERT_EQUAL_HEX8(v, out[b]);
                 }
             }
         }
 
         for (int pv = 0; pv < 2; pv++) {
-            cfg = config(panel(), (uint16_t)w, (uint16_t)h, pv ? EPI_OUT_PREVIEW_NOMINAL : EPI_OUT_PREVIEW_MEASURED);
-            run_converter(&cfg, img, out, NULL);
+            preview_same_size(p, pv != 0, codes, w, h, (epi_rgb_t*)(void*)out);
             for (int i = 0; i < w * h; i++) {
                 epi_rgb_t want = pv ? p->inks[idx[i]].nominal : p->inks[idx[i]].measured;
                 epi_rgb_t got = {out[3 * i], out[3 * i + 1], out[3 * i + 2]};
                 TEST_ASSERT_EQUAL_RGB(want, got);
             }
         }
+        free(panel_codes);
         free(out);
         free(codes);
         free(img);
@@ -501,7 +474,7 @@ void test_converter_reinit_dirty(void) {
     const int w = 29, h = 45;
     epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
     fill_noise(img, (size_t)w * h, 4242);
-    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h);
     size_t size = epi_converter_workspace_size(&cfg);
     uint8_t* ws = xmalloc(size);
     uint8_t* a = xmalloc((size_t)w * h);
@@ -538,7 +511,7 @@ void test_converter_drain_violation(void) {
     const int w = 11, h = 80, r = radius();
     epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
     fill_noise(img, (size_t)w * h, 777);
-    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel(), (uint16_t)w, (uint16_t)h);
     size_t size = epi_converter_workspace_size(&cfg);
     const size_t guard = 256;
     uint8_t* buf = xmalloc(size + 2 * guard);
@@ -602,8 +575,8 @@ void test_converter_drain_violation(void) {
 }
 
 /*
- * Regression goldens: FNV-1a 64 of the CODES8
- * output for each input × preset, frozen from the verified implementation
+ * Regression goldens: FNV-1a 64 of the ink
+ * codes for each input × preset, frozen from the verified implementation
  * (streaming == whole image, and the end-to-end checks). Update only on an
  * intentional change to the output: run the test, and copy the "got" values
  * it prints on failure into this table (one row per input, presets in the
@@ -661,11 +634,13 @@ void test_converter_goldens(void) {
         }
         len += (size_t)snprintf(report + len, sizeof report - len, "\n    /* %s */ {", names[i]);
         for (int p = 0; p < 4; p++) {
-            epi_config_t cfg = config(panel(), GOLDEN_W, GOLDEN_H, EPI_OUT_CODES8);
+            epi_config_t cfg = config(panel(), GOLDEN_W, GOLDEN_H);
             cfg.intent = panel()->presets[p].intent;
             TEST_ASSERT_EQUAL_INT(GOLDEN_H, run_converter(&cfg, img, out, NULL));
             uint64_t hsh = fnv1a64(out, n);
             bad |= hsh != goldens[i][p];
+            /* Through the packer, the same codes reach the panel. */
+            TEST_ASSERT_TRUE(packed_codes_hash(panel(), EPI_PACK_4BPP, 4, out, GOLDEN_W, GOLDEN_H) == hsh);
             len += (size_t)snprintf(
                 report + len, sizeof report - len, "UINT64_C(0x%016llx)%s", (unsigned long long)hsh, p < 3 ? ", " : "},"
             );

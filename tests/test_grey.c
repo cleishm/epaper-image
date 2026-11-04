@@ -209,7 +209,7 @@ void test_grey_panel_validation(void) {
         TEST_ASSERT_NOT_EQUAL_MESSAGE(0, s, msg);
         TEST_ASSERT_EQUAL_INT_MESSAGE(EPI_OK, epi_grey_panel_init(&good[i], st->bytes, s, &p), msg);
         /* Every accepted panel also makes a converter (tables_valid agrees). */
-        epi_config_t cc = config(p, 9, 3, EPI_OUT_CODES8);
+        epi_config_t cc = config(p, 9, 3);
         size_t ws = epi_converter_workspace_size(&cc);
         TEST_ASSERT_NOT_EQUAL_MESSAGE(0, ws, msg);
         void* w = xmalloc(ws);
@@ -298,7 +298,7 @@ void test_grey_panel_storage(void) {
     }
 
     /* A converter on this panel runs from storage at an odd offset. */
-    epi_config_t cc = config(p, 31, 23, EPI_OUT_CODES8);
+    epi_config_t cc = config(p, 31, 23);
     epi_rgb_t img[31 * 23];
     fill_noise(img, 31 * 23, 99);
     uint8_t a[31 * 23], b[31 * 23];
@@ -719,7 +719,7 @@ check_streaming_equals_whole(const epi_panel_t* p, const epi_intent_t* in, const
             row[x] = p->inks[row[x]].code;
         }
     }
-    epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h);
     cfg.intent = in;
     uint8_t* out = xmalloc(n);
     run_converter(&cfg, img, out, NULL);
@@ -769,7 +769,7 @@ void test_grey_converter_streaming(void) {
     const int r = p->tables->kernel_radius, h2 = 50, w2 = 11;
     img = xmalloc((size_t)w2 * h2 * sizeof *img);
     fill_noise(img, (size_t)w2 * h2, 31337);
-    epi_config_t cfg = config(p, (uint16_t)w2, (uint16_t)h2, EPI_OUT_CODES8);
+    epi_config_t cfg = config(p, (uint16_t)w2, (uint16_t)h2);
     uint8_t* ref = xmalloc((size_t)w2 * h2);
     run_converter(&cfg, img, ref, NULL);
     size_t size = epi_converter_workspace_size(&cfg);
@@ -791,20 +791,20 @@ void test_grey_converter_streaming(void) {
 /* Workspace: smaller than colour at the same width, height-independent,
  * any alignment, too small by one byte fails. */
 void test_grey_converter_workspace(void) {
-    epi_config_t g = config(panel4(), 1600, 1200, EPI_OUT_PACKED2);
-    epi_config_t col = config(&epi_panel_el133uf1, 1600, 1200, EPI_OUT_CODES8);
+    epi_config_t g = config(panel4(), 1600, 1200);
+    epi_config_t col = config(&epi_panel_el133uf1, 1600, 1200);
     size_t gs = epi_converter_workspace_size(&g), cs = epi_converter_workspace_size(&col);
     printf("grey workspace at 1600 wide: %zu B (colour %zu B)\n", gs, cs);
     TEST_ASSERT_TRUE(gs > 0 && gs < cs);
     g.height = 7;
     TEST_ASSERT_EQUAL_size_t(gs, epi_converter_workspace_size(&g));
 
-    g = config(panel4(), 37, 5, EPI_OUT_PACKED2);
+    g = config(panel4(), 37, 5);
     size_t size = epi_converter_workspace_size(&g);
     uint8_t* buf = xmalloc(size + 64);
     epi_rgb_t img[37 * 5];
     fill_noise(img, 37 * 5, 8);
-    uint8_t ref[10 * 5], out[10 * 5];
+    uint8_t ref[37 * 5], out[37 * 5];
     run_converter(&g, img, ref, NULL);
     for (int off = 0; off < 32; off++) {
         epi_converter_t* c = (epi_converter_t*)buf;
@@ -826,7 +826,7 @@ void test_grey_converter_white_black(void) {
     for (int k = 0; k < 3; k++) {
         const epi_panel_t* p = ps[k];
         for (size_t i = 0; i < p->preset_count; i++) {
-            epi_config_t cfg = config(p, W, H, EPI_OUT_CODES8);
+            epi_config_t cfg = config(p, W, H);
             cfg.intent = p->presets[i].intent;
             fill_flat(img, W * H, (epi_rgb_t){255, 255, 255});
             run_converter(&cfg, img, out, NULL);
@@ -855,7 +855,7 @@ void test_grey_converter_ramp(void) {
         }
     }
     for (size_t i = 0; i < p->preset_count; i++) {
-        epi_config_t cfg = config(p, W, H, EPI_OUT_CODES8);
+        epi_config_t cfg = config(p, W, H);
         cfg.intent = p->presets[i].intent;
         run_converter(&cfg, img, out, NULL);
         double prev_y = -1, prev_dark = 2, prev_light = -1;
@@ -907,7 +907,7 @@ void test_grey_converter_colour_luminance(void) {
     epi_rgb_t img[W * H];
     uint8_t out[W * H];
     for (int k = 0; k < 2; k++) {
-        epi_config_t cfg = config(ps[k], W, H, EPI_OUT_CODES8);
+        epi_config_t cfg = config(ps[k], W, H);
         fill_flat(img, W * H, (epi_rgb_t){0, 0, 255});
         run_converter(&cfg, img, out, NULL);
         double blue = mean_y(ps[k], out, W * H);
@@ -924,9 +924,9 @@ void test_grey_converter_colour_luminance(void) {
     }
 }
 
-/* Packed formats (2 → PACKED1, 4 → PACKED2, 16 → PACKED4) equal CODES8
- * packed MSB first, padded with the lightest level's code; previews use
- * the measured and nominal colours; code ranges are checked. */
+/* Packed rows (2 levels → 1 bpp, 4 → 2 bpp, 16 → 4 bpp) equal the codes packed
+ * MSB first, padded with the lightest level's code; previews use the measured
+ * and nominal colours; code ranges are checked. */
 void test_grey_converter_formats(void) {
     /* 4 levels with reversed codes, so code ≠ index and the pad is code 0. */
     static epi_ink_t rev4[4];
@@ -936,7 +936,7 @@ void test_grey_converter_formats(void) {
     }
     storage_t* st = &scratch_storage;
     const epi_panel_t* ps[3] = {panel2(), build(st, rev4, 4, 6.0f), panel16()};
-    const epi_output_t packed[3] = {EPI_OUT_PACKED1, EPI_OUT_PACKED2, EPI_OUT_PACKED4};
+    const epi_pack_format_t packed[3] = {EPI_PACK_1BPP, EPI_PACK_2BPP, EPI_PACK_4BPP};
     const unsigned bits[3] = {1, 2, 4};
     const int widths[] = {1, 5, 13, 37};
     for (int k = 0; k < 3; k++) {
@@ -947,54 +947,44 @@ void test_grey_converter_formats(void) {
             epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
             fill_noise(img, (size_t)w * h, (uint32_t)(77 + w + k));
             uint8_t* codes = xmalloc((size_t)w * h);
-            epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+            epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h);
             run_converter(&cfg, img, codes, NULL);
-            for (int o = EPI_OUT_PACKED4; o <= EPI_OUT_PREVIEW_NOMINAL; o++) {
-                cfg.output = (epi_output_t)o;
-                if (o >= EPI_OUT_PACKED4 && o <= EPI_OUT_PACKED1) {
-                    unsigned ob = o == EPI_OUT_PACKED4 ? 4u : (o == EPI_OUT_PACKED2 ? 2u : 1u);
-                    if (ob < bits[k]) {
-                        /* Codes too wide for this format. */
-                        TEST_ASSERT_EQUAL_size_t(0, epi_converter_workspace_size(&cfg));
-                        continue;
-                    }
+            for (int f = 0; f < 3; f++) {
+                const unsigned ob = bits[f], per = 8u / ob;
+                const size_t rs = epi_pack_row_size(packed[f], (uint16_t)w);
+                uint8_t* out = xmalloc(rs);
+                if (ob < bits[k]) {
+                    /* Codes too wide for this format. */
+                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_pack_row(p, packed[f], codes, (uint16_t)w, out));
+                    free(out);
+                    continue;
                 }
-                const size_t rs = epi_output_row_size(cfg.output, (uint16_t)w);
-                uint8_t* out = xmalloc(rs * h);
-                run_converter(&cfg, img, out, NULL);
                 for (int y = 0; y < h; y++) {
                     const uint8_t* cr = codes + (size_t)y * w;
-                    const uint8_t* orow = out + (size_t)y * rs;
-                    if (o == EPI_OUT_PREVIEW_MEASURED || o == EPI_OUT_PREVIEW_NOMINAL) {
-                        for (int x = 0; x < w; x++) {
-                            const epi_ink_t* ink = &p->inks[code_to_index(p, cr[x])];
-                            epi_rgb_t want = o == EPI_OUT_PREVIEW_MEASURED ? ink->measured : ink->nominal;
-                            epi_rgb_t got = {orow[3 * x], orow[3 * x + 1], orow[3 * x + 2]};
-                            TEST_ASSERT_EQUAL_RGB(want, got);
+                    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_pack_row(p, packed[f], cr, (uint16_t)w, out));
+                    for (size_t b = 0; b < rs; b++) {
+                        unsigned v = 0;
+                        for (unsigned j = 0; j < per; j++) {
+                            size_t x = b * per + j;
+                            v = (v << ob) | (x < (size_t)w ? cr[x] : pad);
                         }
-                    } else {
-                        unsigned ob = o == EPI_OUT_PACKED4 ? 4u : (o == EPI_OUT_PACKED2 ? 2u : 1u);
-                        unsigned per = 8u / ob;
-                        for (size_t b = 0; b < rs; b++) {
-                            unsigned v = 0;
-                            for (unsigned j = 0; j < per; j++) {
-                                size_t x = b * per + j;
-                                v = (v << ob) | (x < (size_t)w ? cr[x] : pad);
-                            }
-                            TEST_ASSERT_EQUAL_HEX8(v, orow[b]);
-                        }
+                        TEST_ASSERT_EQUAL_HEX8(v, out[b]);
                     }
                 }
                 free(out);
             }
+            epi_rgb_t* rgb = xmalloc((size_t)w * h * sizeof *rgb);
+            for (int nominal = 0; nominal < 2; nominal++) {
+                preview_same_size(p, nominal != 0, codes, w, h, rgb);
+                for (int i = 0; i < w * h; i++) {
+                    const epi_ink_t* ink = &p->inks[code_to_index(p, codes[i])];
+                    TEST_ASSERT_EQUAL_RGB(nominal ? ink->nominal : ink->measured, rgb[i]);
+                }
+            }
+            free(rgb);
             free(codes);
             free(img);
         }
-    }
-    /* The natural format for each is accepted. */
-    for (int k = 0; k < 3; k++) {
-        epi_config_t cfg = config(ps[k], 8, 2, packed[k]);
-        TEST_ASSERT_NOT_EQUAL(0, epi_converter_workspace_size(&cfg));
     }
 }
 
@@ -1003,7 +993,7 @@ void test_grey_deterministic(void) {
     const int w = 29, h = 45;
     epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
     fill_noise(img, (size_t)w * h, 4243);
-    epi_config_t cfg = config(panel4(), (uint16_t)w, (uint16_t)h, EPI_OUT_CODES8);
+    epi_config_t cfg = config(panel4(), (uint16_t)w, (uint16_t)h);
     size_t size = epi_converter_workspace_size(&cfg);
     uint8_t* ws = xmalloc(size);
     uint8_t* a = xmalloc((size_t)w * h);
@@ -1025,7 +1015,7 @@ void test_grey_deterministic(void) {
 }
 
 /*
- * Regression goldens: FNV-1a 64 of the CODES8 output for each input ×
+ * Regression goldens: FNV-1a 64 of the ink codes for each input ×
  * preset (Default, Soft, Deep), on the 4-level and the 2-level test panel.
  * These freeze the output of the verified implementation. Update only on an
  * intentional change: copy the "got" values printed on failure.
@@ -1060,6 +1050,8 @@ static const uint64_t grey_goldens[2][3][3] = {
 void test_grey_goldens(void) {
     static const char* inputs[3] = {"gradient", "hue ramp", "noise"};
     const epi_panel_t* ps[2] = {panel4(), panel2()};
+    const epi_pack_format_t formats[2] = {EPI_PACK_2BPP, EPI_PACK_1BPP};
+    const unsigned bits[2] = {2, 1};
     const size_t n = (size_t)GOLDEN_W * GOLDEN_H;
     epi_rgb_t* img = xmalloc(n * sizeof *img);
     uint8_t* out = xmalloc(n);
@@ -1085,11 +1077,13 @@ void test_grey_goldens(void) {
                 report + len, sizeof report - len, "\n        /* %d levels: %s */ {", k == 0 ? 4 : 2, inputs[i]
             );
             for (int p = 0; p < 3; p++) {
-                epi_config_t cfg = config(ps[k], GOLDEN_W, GOLDEN_H, EPI_OUT_CODES8);
+                epi_config_t cfg = config(ps[k], GOLDEN_W, GOLDEN_H);
                 cfg.intent = ps[k]->presets[p].intent;
                 run_converter(&cfg, img, out, NULL);
                 uint64_t hsh = fnv1a64(out, n);
                 bad |= hsh != grey_goldens[k][i][p];
+                /* Through the packer, the same codes reach the panel. */
+                TEST_ASSERT_TRUE(packed_codes_hash(ps[k], formats[k], bits[k], out, GOLDEN_W, GOLDEN_H) == hsh);
                 len += (size_t)snprintf(
                     report + len,
                     sizeof report - len,

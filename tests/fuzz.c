@@ -7,7 +7,8 @@
  * buffer allocated at exactly the size the API reports so AddressSanitizer
  * sees any overrun. A separate pass checks the source size limit with sizes
  * and limits at and beyond its edges. Each pipeline must emit exactly as many
- * rows as its configuration promises.
+ * rows as its configuration promises. The preview reducer and the row packer
+ * run the same way on random sizes and codes, including codes they must reject.
  *
  * Every check exits nonzero with a message in every build type; the
  * sanitizers report the memory and undefined-behaviour errors.
@@ -15,7 +16,8 @@
  *   epaper_image_fuzz [iterations [seed]]
  *
  * iterations (default 3000) is the resampler count; the source-limit check
- * runs as many, and the converter a third as many. The default seed is fixed,
+ * runs as many, and the converter, the reducer and the packer a third as many
+ * each. The default seed is fixed,
  * so a run is reproducible; a seed, if given, is mixed into it. Built with
  * -DEPAPER_IMAGE_BUILD_FUZZ=ON;
  * run under ctest, ideally with -fsanitize=address,undefined.
@@ -421,7 +423,6 @@ static const epi_panel_t* rand_grey(uint8_t* store, size_t cap) {
 }
 
 static long cv_ok;
-static long cv_invalid;
 static long grey_rand;
 
 static void fuzz_converter(int iters) {
@@ -452,17 +453,10 @@ static void fuzz_converter(int iters) {
             in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4)};
         }
         epi_config_t c = {
-            p,
-            ru(4) ? &in : NULL,
-            (uint16_t)(1 + ru(ru(8) ? 120 : 1500)),
-            (uint16_t)(1 + ru(ru(8) ? 80 : 300)),
-            (epi_output_t)ru(6)
+            p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(ru(8) ? 120 : 1500)), (uint16_t)(1 + ru(ru(8) ? 80 : 300))
         };
         size_t need = epi_converter_workspace_size(&c);
-        if (!need) {
-            cv_invalid++;
-            continue;
-        }
+        CHECK(need != 0, "workspace size rejected a valid config");
         unsigned mis = ru(32);
         uint8_t* raw = malloc(need + mis);
         CHECK(raw != NULL, "out of memory");
@@ -473,8 +467,7 @@ static void fuzz_converter(int iters) {
         );
         epi_err_t e = epi_converter_init(&c, raw + mis, need, &cv);
         CHECK(e == EPI_OK, "converter init: %s", epi_strerror(e));
-        size_t rs = epi_output_row_size(c.output, c.width);
-        uint8_t* out = malloc(rs);
+        uint8_t* out = malloc(c.width);
         epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
         CHECK(out != NULL && row != NULL, "out of memory");
         int mode = (int)ru(8);
@@ -495,7 +488,198 @@ static void fuzz_converter(int iters) {
         free(raw);
         cv_ok++;
     }
-    printf("converter: ok=%ld invalid=%ld (random grey %ld)\n", cv_ok, cv_invalid, grey_rand);
+    printf("converter: ok=%ld (random grey %ld)\n", cv_ok, grey_rand);
+}
+
+/* A built-in panel, or sometimes a random grey one (codes 0..level_count - 1). */
+static const epi_panel_t* rand_panel(uint8_t* store, size_t cap) {
+    switch (ru(4)) {
+    case 0:
+        return &epi_panel_el133uf1;
+    case 1:
+        return &epi_panel_gdey075t7_mono;
+    case 2:
+        return &epi_panel_gdey075t7_grey4;
+    default: {
+        const epi_panel_t* p = rand_grey(store, cap);
+        return p ? p : &epi_panel_el133uf1;
+    }
+    }
+}
+
+/* A code that is not one of the panel's inks. */
+static uint8_t foreign_code(const epi_panel_t* p) {
+    for (uint32_t code = ru(256);; code = (code + 1) & 255) {
+        size_t i = 0;
+        while (i < p->ink_count && p->inks[i].code != code) {
+            i++;
+        }
+        if (i == p->ink_count) {
+            return (uint8_t)code;
+        }
+    }
+}
+
+/* Random sizes (sometimes invalid), one workspace byte short and then exact, at
+ * any alignment; rows of random codes, with rejected rows among them. The row
+ * count must be right, and a block of one ink must come out as that ink. */
+static void fuzz_preview(int iters) {
+    static uint8_t store[1 << 16];
+    long ok = 0, invalid = 0, rejected = 0, rows = 0;
+    for (int it = 0; it < iters; it++) {
+        const epi_panel_t* p = rand_panel(store, sizeof store - 16);
+        epi_preview_config_t c;
+        memset(&c, 0, sizeof c);
+        c.panel = p;
+        c.src_width = rdim(1);
+        c.src_height = rdim(1);
+        if ((uint64_t)c.src_width * c.src_height > 3000000u) {
+            c.src_height = (uint16_t)(1 + ru(40));
+        }
+        c.dst_width = (uint16_t)(1 + ru(c.src_width));
+        c.dst_height = (uint16_t)(1 + ru(c.src_height));
+        c.nominal = ru(2) != 0;
+        const int broken = ru(16) == 0;
+        if (broken) {
+            switch (ru(4)) {
+            case 0:
+                c.dst_width = (uint16_t)(c.src_width + 1u); /* wraps to 0 from 65535: also invalid */
+                break;
+            case 1:
+                c.dst_height = 0;
+                break;
+            case 2:
+                c.src_height = 0;
+                break;
+            default:
+                c.panel = NULL;
+                break;
+            }
+        }
+        const size_t need = epi_preview_workspace_size(&c);
+        epi_preview_t* r = NULL;
+        if (broken) {
+            char b[8];
+            CHECK(need == 0, "an invalid config was sized");
+            CHECK(epi_preview_init(&c, b, sizeof b, &r) == EPI_ERR_INVALID_ARG && r == NULL, "invalid config accepted");
+            invalid++;
+            continue;
+        }
+        CHECK(need != 0, "a valid config got size 0");
+        unsigned mis = ru(32);
+        uint8_t* raw = malloc(need + mis);
+        CHECK(raw != NULL, "out of memory");
+        CHECK(
+            epi_preview_init(&c, raw + mis, need - 1, &r) == EPI_ERR_WORKSPACE_TOO_SMALL,
+            "init accepted a workspace one byte short"
+        );
+        epi_err_t e = epi_preview_init(&c, raw + mis, need, &r);
+        CHECK(e == EPI_OK, "preview init: %s", epi_strerror(e));
+        uint8_t* in = malloc(c.src_width);
+        epi_rgb_t* out = malloc((size_t)c.dst_width * sizeof *out);
+        CHECK(in != NULL && out != NULL, "out of memory");
+        const size_t ink = ru((uint32_t)p->ink_count);
+        const int one_ink = ru(4) == 0;
+        const epi_rgb_t want = c.nominal ? p->inks[ink].nominal : p->inks[ink].measured;
+        uint32_t got = 0;
+        for (uint32_t y = 0; y < c.src_height; y++) {
+            for (uint32_t x = 0; x < c.src_width; x++) {
+                in[x] = p->inks[one_ink ? ink : ru((uint32_t)p->ink_count)].code;
+            }
+            if (ru(8) == 0) {
+                const uint32_t pos = ru(c.src_width);
+                const uint8_t keep = in[pos];
+                in[pos] = foreign_code(p);
+                CHECK(epi_preview_push(r, in) == EPI_ERR_INVALID_ARG, "foreign code accepted");
+                in[pos] = keep;
+                rejected++;
+            }
+            CHECK(epi_preview_push(r, in) == EPI_OK, "push of row %u failed", (unsigned)y);
+            while (epi_preview_pop(r, out) == EPI_OK) {
+                got++;
+                rows++;
+                for (uint32_t x = 0; one_ink && x < c.dst_width; x++) {
+                    CHECK(
+                        out[x].r == want.r && out[x].g == want.g && out[x].b == want.b,
+                        "one ink changed colour (src=%ux%u dst=%ux%u)",
+                        (unsigned)c.src_width,
+                        (unsigned)c.src_height,
+                        (unsigned)c.dst_width,
+                        (unsigned)c.dst_height
+                    );
+                }
+            }
+        }
+        CHECK(
+            got == c.dst_height,
+            "reducer emitted %u rows, want %u (src=%ux%u dst=%ux%u)",
+            (unsigned)got,
+            (unsigned)c.dst_height,
+            (unsigned)c.src_width,
+            (unsigned)c.src_height,
+            (unsigned)c.dst_width,
+            (unsigned)c.dst_height
+        );
+        CHECK(epi_preview_pop(r, out) == EPI_ERR_FINISHED, "pop past the last row");
+        CHECK(epi_preview_push(r, in) == EPI_ERR_FINISHED, "push past the last row");
+        free(in);
+        free(out);
+        free(raw);
+        ok++;
+    }
+    printf("reducer: ok=%ld invalid=%ld rejected rows=%ld rows=%ld\n", ok, invalid, rejected, rows);
+}
+
+/* Random widths and codes in an exactly sized row: the codes must unpack again, a
+ * partial byte must carry the lightest ink's code, and a panel with a code too
+ * wide for the format must be refused. */
+static void fuzz_pack(int iters) {
+    static uint8_t store[1 << 16];
+    static const epi_pack_format_t formats[] = {EPI_PACK_4BPP, EPI_PACK_2BPP, EPI_PACK_1BPP};
+    long ok = 0, refused = 0, wide = 0;
+    for (int it = 0; it < iters; it++) {
+        const epi_panel_t* p = rand_panel(store, sizeof store - 16);
+        const epi_pack_format_t format = formats[ru(3)];
+        const unsigned bits = format == EPI_PACK_4BPP ? 4u : format == EPI_PACK_2BPP ? 2u : 1u;
+        const uint16_t w = (uint16_t)(ru(16) ? 1 + ru(ru(4) ? 64 : 4000) : 65535);
+        const size_t rs = epi_pack_row_size(format, w);
+        CHECK(rs == ((size_t)w * bits + 7u) / 8u, "row size %zu at width %u", rs, (unsigned)w);
+        uint8_t* in = malloc(w);
+        uint8_t* out = malloc(rs);
+        CHECK(in != NULL && out != NULL, "out of memory");
+        for (uint32_t x = 0; x < w; x++) {
+            in[x] = p->inks[ru((uint32_t)p->ink_count)].code;
+        }
+        bool fits = true;
+        for (size_t i = 0; i < p->ink_count; i++) {
+            fits = fits && (p->inks[i].code >> bits) == 0;
+        }
+        if (!fits) {
+            CHECK(epi_pack_row(p, format, in, w, out) == EPI_ERR_INVALID_ARG, "a panel too wide for the format passed");
+            refused++;
+        } else {
+            CHECK(epi_pack_row(p, format, in, w, out) == EPI_OK, "pack failed at width %u", (unsigned)w);
+            const unsigned mask = (1u << bits) - 1u, per = 8u / bits;
+            for (uint32_t x = 0; x < w; x++) {
+                const unsigned code = (out[x / per] >> (8u - bits - (x % per) * bits)) & mask;
+                CHECK(code == in[x], "code %u at x=%u unpacked as %u", (unsigned)in[x], (unsigned)x, code);
+            }
+            /* EL133UF1's white is code 1; a grey panel lists its levels darkest first. */
+            const unsigned pad = p == &epi_panel_el133uf1 ? 1u : p->inks[p->ink_count - 1].code;
+            for (uint32_t x = w; x % per != 0; x++) {
+                const unsigned code = (out[x / per] >> (8u - bits - (x % per) * bits)) & mask;
+                CHECK(code == pad, "padding %u, want %u at width %u", code, pad, (unsigned)w);
+            }
+            /* A code too wide is refused, anywhere in the row. */
+            in[ru(w)] = (uint8_t)((1u << bits) + ru(256u - (1u << bits)));
+            CHECK(epi_pack_row(p, format, in, w, out) == EPI_ERR_INVALID_ARG, "a code too wide passed");
+            wide++;
+            ok++;
+        }
+        free(in);
+        free(out);
+    }
+    printf("packer: ok=%ld refused=%ld too-wide=%ld\n", ok, refused, wide);
 }
 
 int main(int argc, char** argv) {
@@ -507,5 +691,7 @@ int main(int argc, char** argv) {
     fuzz_resampler(n);
     fuzz_limits(n);
     fuzz_converter(n / 3);
+    fuzz_preview(n / 3);
+    fuzz_pack(n / 3);
     return 0;
 }

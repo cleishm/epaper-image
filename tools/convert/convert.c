@@ -11,14 +11,15 @@
  *               -> epi_converter (tone, gamut, error diffusion to ink codes)
  *               -> panel rows
  *
- * The converter writes one ink code per pixel (EPI_OUT_CODES8) into a
- * frame buffer, because --rotate and --compare rearrange the frame before
- * it is packed. Firmware that shows the image as rendered would ask the
- * converter for the packed format directly and send each row as it pops.
+ * The converter writes one ink code per pixel into a frame buffer, because
+ * --rotate and --compare rearrange the frame before it is packed. From that
+ * buffer, epi_pack_row makes the frame and epi_preview makes the preview.
+ * Firmware that shows the image as rendered would pack each row as it pops
+ * and send it.
  *
- * OUTPUT receives the frame in the panel's native layout, packed the way
- * the converter's packed formats are (8/bits codes per byte, leftmost in
- * the most significant bits), rows top to bottom, no header.
+ * OUTPUT receives the frame in the panel's native layout, packed by
+ * epi_pack_row (8/bits codes per byte, leftmost in the most significant
+ * bits), rows top to bottom, no header.
  */
 
 #include "exif.h"
@@ -41,29 +42,16 @@
 typedef struct {
     const char* name;         /* --panel value */
     const epi_panel_t* panel; /* built-in calibration */
-    epi_output_t format;      /* the packed format the panel is sent */
+    epi_pack_format_t format; /* the packed format the panel is sent */
     const char* about;
 } panel_info_t;
 
 static const panel_info_t PANELS[] = {
-    {"el133uf1", &epi_panel_el133uf1, EPI_OUT_PACKED4, "13.3\" Spectra 6 colour (reTerminal E1004)"},
-    {"gdey075t7-mono", &epi_panel_gdey075t7_mono, EPI_OUT_PACKED1, "7.5\" black and white (XIAO EE05)"},
-    {"gdey075t7-grey4", &epi_panel_gdey075t7_grey4, EPI_OUT_PACKED2, "7.5\" 4-level grey (XIAO EE05)"},
+    {"el133uf1", &epi_panel_el133uf1, EPI_PACK_4BPP, "13.3\" Spectra 6 colour (reTerminal E1004)"},
+    {"gdey075t7-mono", &epi_panel_gdey075t7_mono, EPI_PACK_1BPP, "7.5\" black and white (XIAO EE05)"},
+    {"gdey075t7-grey4", &epi_panel_gdey075t7_grey4, EPI_PACK_2BPP, "7.5\" 4-level grey (XIAO EE05)"},
 };
 #define PANEL_COUNT (sizeof PANELS / sizeof PANELS[0])
-
-static unsigned bits_per_code(epi_output_t format) {
-    switch (format) {
-    case EPI_OUT_PACKED4:
-        return 4;
-    case EPI_OUT_PACKED2:
-        return 2;
-    case EPI_OUT_PACKED1:
-        return 1;
-    default:
-        return 8;
-    }
-}
 
 /* Index of the panel's lightest (or darkest) ink by measured luminance. */
 static size_t ink_by_lightness(const epi_panel_t* p, bool lightest) {
@@ -89,6 +77,7 @@ typedef struct {
     const char* input;
     const char* output;
     const char* preview;
+    float preview_scale;
     bool nominal;
     bool fit;
     bool rotate;
@@ -126,6 +115,8 @@ static const char USAGE[] =
     "  --rotate            render for the panel turned a quarter turn clockwise\n"
     "                      (landscape on the el133uf1, portrait on the gdey075t7)\n"
     "  --preview FILE.png  also write what the panel will show, as rendered\n"
+    "  --preview-scale X   make the preview X (0 < X <= 1) of the shown size,\n"
+    "                      averaged in linear light (default 1)\n"
     "  --nominal           preview in the inks' nominal colours, not measured\n"
     "\n"
     "Blind comparison:\n"
@@ -251,7 +242,7 @@ static bool parse_rgb(const char* s, epi_rgb_t* out) {
 static void print_panels(void) {
     for (size_t i = 0; i < PANEL_COUNT; i++) {
         const epi_panel_t* p = PANELS[i].panel;
-        const size_t bytes = epi_output_row_size(PANELS[i].format, p->width) * p->height;
+        const size_t bytes = epi_pack_row_size(PANELS[i].format, p->width) * p->height;
         printf("%-16s %s\n", PANELS[i].name, PANELS[i].about);
         printf(
             "%-16s %ux%u, %zu inks, %u bpp, %zu-byte frame\n",
@@ -259,7 +250,7 @@ static void print_panels(void) {
             (unsigned)p->width,
             (unsigned)p->height,
             p->ink_count,
-            bits_per_code(PANELS[i].format),
+            (unsigned)epi_pack_row_size(PANELS[i].format, 8),
             bytes
         );
         printf("%-16s presets: ", "");
@@ -280,6 +271,8 @@ static int parse_args(int argc, char** argv, options_t* o) {
     o->panel = &PANELS[0];
     o->background = (epi_rgb_t){255, 255, 255};
     o->filter = EPI_FILTER_LANCZOS3;
+    o->preview_scale = 1.0f;
+    bool preview_scale_set = false;
 
     for (int i = 1; i < argc; i++) {
         const char* a = argv[i];
@@ -356,6 +349,11 @@ static int parse_args(int argc, char** argv, options_t* o) {
             o->filter = ids[k];
         } else if (strcmp(a, "--preview") == 0) {
             o->preview = v;
+        } else if (strcmp(a, "--preview-scale") == 0) {
+            if (!parse_float(v, &o->preview_scale) || !(o->preview_scale > 0.0f && o->preview_scale <= 1.0f)) {
+                return fail("--preview-scale %s: want a number above 0, up to 1", v);
+            }
+            preview_scale_set = true;
         } else if (strcmp(a, "--key") == 0) {
             o->key = v;
         } else if (strcmp(a, "--seed") == 0) {
@@ -378,6 +376,10 @@ static int parse_args(int argc, char** argv, options_t* o) {
         if (!known) {
             return fail("unknown option %s (see --help)", a);
         }
+    }
+
+    if (preview_scale_set && !o->preview) {
+        return fail("--preview-scale needs --preview");
     }
 
     const epi_panel_t* p = o->panel->panel;
@@ -496,7 +498,6 @@ static int render(
             .intent = &intents[k],
             .width = w,
             .height = h,
-            .output = EPI_OUT_CODES8,
         };
         const size_t size = epi_converter_workspace_size(&ccfg);
         cv_mem[k] = malloc(size ? size : 1);
@@ -656,31 +657,13 @@ static int write_key(const options_t* o, const size_t* cell_of) {
 /* ---- Output ----------------------------------------------------------- */
 
 /*
- * Pack one row of codes as the converter's packed formats do: 8/bits codes
- * per byte, the leftmost in the most significant bits; a partial last byte
- * padded with the lightest ink's code.
- */
-static void pack_row(const uint8_t* codes, size_t width, unsigned bits, uint8_t pad, uint8_t* out) {
-    const unsigned per_byte = 8 / bits;
-    for (size_t x = 0; x < width; x += per_byte) {
-        unsigned byte = 0;
-        for (unsigned i = 0; i < per_byte; i++) {
-            byte = (byte << bits) | (x + i < width ? codes[x + i] : pad);
-        }
-        *out++ = (uint8_t)byte;
-    }
-}
-
-/*
  * Write the frame in the panel's native layout. With --rotate the frame
  * was rendered turned a quarter turn clockwise (vw x vh = native height x
  * width): view pixel (x, y) is native pixel (y, H - 1 - x).
  */
 static int write_frame(const options_t* o, const uint8_t* view, uint16_t vw) {
     const epi_panel_t* p = o->panel->panel;
-    const unsigned bits = bits_per_code(o->panel->format);
-    const uint8_t pad = p->inks[ink_by_lightness(p, true)].code;
-    const size_t packed = epi_output_row_size(o->panel->format, p->width);
+    const size_t packed = epi_pack_row_size(o->panel->format, p->width);
     uint8_t* codes = malloc(p->width);
     uint8_t* row = malloc(packed);
     FILE* f = fopen(o->output, "wb");
@@ -697,7 +680,11 @@ static int write_frame(const options_t* o, const uint8_t* view, uint16_t vw) {
             }
             src = codes;
         }
-        pack_row(src, p->width, bits, pad, row);
+        const epi_err_t err = epi_pack_row(p, o->panel->format, src, p->width, row);
+        if (err != EPI_OK) {
+            rc = fail("epi_pack_row: %s", epi_strerror(err));
+            goto out;
+        }
         if (fwrite(row, 1, packed, f) != packed) {
             rc = fail("cannot write %s: %s", o->output, strerror(errno));
             goto out;
@@ -712,25 +699,52 @@ out:
     return rc;
 }
 
-/* The preview: each code shown in its ink's measured (or nominal) colour, upright. */
+/* One side of the preview: --preview-scale of the shown side, at least 1. */
+static uint16_t preview_side(uint16_t side, float scale) {
+    const long n = lround((double)side * scale);
+    return (uint16_t)(n < 1 ? 1 : n);
+}
+
+/*
+ * The preview, upright: the codes in the inks' measured (or nominal) colours,
+ * averaged in linear light when smaller than the shown image. After every push,
+ * pop until nothing is ready.
+ */
 static int write_preview(const options_t* o, const uint8_t* view, uint16_t vw, uint16_t vh) {
-    const epi_panel_t* p = o->panel->panel;
-    epi_rgb_t lut[256] = {{0, 0, 0}};
-    for (size_t i = 0; i < p->ink_count; i++) {
-        lut[p->inks[i].code] = o->nominal ? p->inks[i].nominal : p->inks[i].measured;
+    const epi_preview_config_t cfg = {
+        .panel = o->panel->panel,
+        .src_width = vw,
+        .src_height = vh,
+        .dst_width = preview_side(vw, o->preview_scale),
+        .dst_height = preview_side(vh, o->preview_scale),
+        .nominal = o->nominal,
+    };
+    const size_t size = epi_preview_workspace_size(&cfg);
+    void* mem = malloc(size ? size : 1);
+    epi_rgb_t* rgb = malloc((size_t)cfg.dst_width * cfg.dst_height * sizeof *rgb);
+    int rc = 0;
+    if (!mem || !rgb) {
+        rc = fail("out of memory");
+        goto out;
     }
-    uint8_t* rgb = malloc((size_t)vw * vh * 3);
-    if (!rgb) {
-        return fail("out of memory");
+    epi_preview_t* preview = NULL;
+    epi_err_t err = epi_preview_init(&cfg, mem, size, &preview);
+    size_t done = 0;
+    for (size_t y = 0; err == EPI_OK && y < vh; y++) {
+        err = epi_preview_push(preview, view + y * vw);
+        while (err == EPI_OK && epi_preview_pop(preview, rgb + done * cfg.dst_width) == EPI_OK) {
+            done++;
+        }
     }
-    for (size_t i = 0; i < (size_t)vw * vh; i++) {
-        rgb[3 * i + 0] = lut[view[i]].r;
-        rgb[3 * i + 1] = lut[view[i]].g;
-        rgb[3 * i + 2] = lut[view[i]].b;
+    if (err != EPI_OK) {
+        rc = fail("epi_preview: %s", epi_strerror(err));
+    } else if (!stbi_write_png(o->preview, cfg.dst_width, cfg.dst_height, 3, rgb, cfg.dst_width * 3)) {
+        rc = fail("cannot write %s", o->preview);
     }
-    const int ok = stbi_write_png(o->preview, vw, vh, 3, rgb, vw * 3);
+out:
     free(rgb);
-    return ok ? 0 : fail("cannot write %s", o->preview);
+    free(mem);
+    return rc;
 }
 
 /* The whole file, malloc'd (NULL with errno set on failure). */

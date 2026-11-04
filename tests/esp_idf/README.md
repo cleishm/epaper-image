@@ -12,8 +12,9 @@ Differences from the host build:
 
 - `EPI_TEST_EXHAUSTIVE=0`: the 2^31-input cbrt monotonicity test is ignored.
 - Assertions are on, and there is no `fork()`, so
-  `test_converter_drain_violation` is ignored (its death-test branch needs
-  fork, and its NDEBUG branch needs a release build of the library).
+  `test_converter_drain_violation` and `test_preview_drain_violation` are
+  ignored (their death-test branches need fork, and their NDEBUG branches need
+  a release build of the library).
 - `-O2` (`CONFIG_COMPILER_OPTIMIZATION_PERF`), full newlib printf, 64-bit
   Unity assertions, no task watchdog, 64 KB main task stack.
 

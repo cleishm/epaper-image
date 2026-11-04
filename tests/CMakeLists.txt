@@ -36,6 +36,7 @@ add_executable(epaper_image_tests
     test_converter.c
     test_grey.c
     test_resampler.c
+    test_preview.c
 )
 target_link_libraries(epaper_image_tests PRIVATE
     epaper_image::epaper_image
