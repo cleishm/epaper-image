@@ -273,11 +273,14 @@ static void hull_quantise(const hull_t* h, double xyz[][3], size_t n, epi_colour
  * ink's chromaticity and k the black-point scale, and M_bpc = (W_y − B_y)·M_srgb.
  * Source white must land exactly on the white ink, and rounding entry by entry
  * can miss a row's sum by an LSB, which would put white just outside the hull's
- * white vertex: each row's residual goes on its largest-magnitude entry. False
- * if an entry doesn't fit Q16: only with a white ink far from neutral and a black
- * ink far above it in X or Z.
+ * white vertex: each row's residual goes on its largest-magnitude entry.
+ *
+ * Every entry fits Q16 for any inks. XYZ is M_srgb times a non-negative colour, so
+ * X/Y is in [0.5, 2.5] and Z/Y in [0.09, 13.2]. Those keep |adapt_lin| under 12 and
+ * b/w under 146 in each of X, Y and Z, and k = W_y·(1 − b/w) with W_y at most 1, so
+ * an entry is under 1,800 in magnitude.
  */
-static bool adaptation_matrices(const double w[3], const double b[3], epi_colour_tables_t* t) {
+static void adaptation_matrices(const double w[3], const double b[3], epi_colour_tables_t* t) {
     const double neutral[3] = {w[0] / w[1], 1.0, w[2] / w[1]};
     const double one[3] = {1.0, 1.0, 1.0};
     double d65[3], rs[3], rd[3], adapted_white[3];
@@ -296,30 +299,24 @@ static bool adaptation_matrices(const double w[3], const double b[3], epi_colour
         int32_t* row = t->lin_to_panel_adapt[r];
         int largest = 0;
         for (int c = 0; c < 3; c++) {
-            const double v = k * adapt_lin.m[r][c];
-            if (!(v > -32767.0 && v < 32767.0)) {
-                return false;
-            }
-            row[c] = q16(v);
+            row[c] = q16(k * adapt_lin.m[r][c]);
             largest = epi_abs32(row[c]) > epi_abs32(row[largest]) ? c : largest;
             t->lin_to_panel_bpc[r][c] = q16((w[1] - b[1]) * M_SRGB.m[r][c]);
         }
         row[largest] += (int32_t)((int64_t)t->white_xyz[r] - t->black_xyz[r] - row[0] - row[1] - row[2]);
     }
-    return true;
 }
 
 /*
  * L*min and L*max: the ends of the segment of the neutral axis, the ray
  * Y·W/W_y, inside the hull. Shrunk a hair so that they test inside. W is on the
- * ray and no ink is above it in Y, so a face bounds the ray well below 2·W_y,
- * which keeps the ends in epi_lab_f_d's domain. The ray lies in the plane of a
- * face through a neutral black and white, where k and d are both rounding noise,
- * so such a face bounds nothing.
+ * ray and no ink is above it in Y, so the segment ends at W_y at most, which keeps
+ * L*max below 100. The ray lies in the plane of a face through a neutral black and
+ * white, where k and d are both rounding noise, so such a face bounds nothing.
  */
 static bool neutral_lstar(const hull_t* h, const double w[3], double* lmin, double* lmax) {
     const double neutral[3] = {w[0] / w[1], 1.0, w[2] / w[1]};
-    double lo = 0.0, hi = 2.0 * w[1];
+    double lo = 0.0, hi = w[1];
     for (unsigned f = 0; f < h->count; f++) {
         const double k = h->n[f][0] * neutral[0] + h->n[f][1] * neutral[1] + h->n[f][2] * neutral[2];
         if (k > HULL_SIDE_TOL) {
@@ -570,9 +567,7 @@ epi_err_t epi_colour_tables_derive(
     if (!ink_tables(inks, n, wl, t)) {
         return reject(why, "ink outside the range the white ink allows");
     }
-    if (!adaptation_matrices(w, b, t)) {
-        return reject(why, "white ink too far from neutral for its black");
-    }
+    adaptation_matrices(w, b, t);
     const mat3_t m_inv = mat3_inverse(&M_SRGB);
     const double wl_len = epi_sqrt_d(wl[0] * wl[0] + wl[1] * wl[1] + wl[2] * wl[2]);
     for (int r = 0; r < 3; r++) {
@@ -595,12 +590,6 @@ epi_err_t epi_colour_tables_derive(
     }
     if (!epi_midtone_monotone(t->lstar_min)) {
         return reject(why, "darkest neutral L* is too light for the tone curve");
-    }
-    if (t->lstar_max > 100 * 256) {
-        return reject(why, "lightest neutral L* is above 100");
-    }
-    if (t->lstar_max - t->lstar_min < 2 * EPI_CUSP_MARGIN_Q8) {
-        return reject(why, "neutral range too narrow for the cusp margin");
     }
     return cusp_table(&h, w, lmin, lmax, t, why, progress, progress_ctx);
 }
