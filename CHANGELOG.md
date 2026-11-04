@@ -3,6 +3,53 @@
 All notable changes to **epaper-image** are documented in this file. The project
 follows [semantic versioning](https://semver.org/).
 
+## v0.2.0
+
+Adds linear-light previews of any size, and colour panels built at runtime from
+measured inks. The converter now outputs ink codes only, which breaks the API.
+
+**Panel output:** EL133UF1 frames change. Two cusp table entries move by one,
+which reseeds the dither, so the frames differ pixel by pixel but look the same
+on the panel. Grey and mono output is unchanged.
+
+### Breaking changes
+
+- `epi_converter_pop` writes `width` ink codes into a `uint8_t*`. Pack them for
+  the panel with `epi_pack_row`, or pass them to `epi_preview_push`. Firmware
+  streaming to a panel needs that call and a row buffer, and the converter's
+  workspace shrinks by one row.
+- `epi_output_t`, `EPI_OUT_*`, `epi_config_t.output` and `epi_output_row_size`
+  are removed.
+- A panel whose codes don't fit a packed format is rejected by `epi_pack_row`,
+  not at converter init.
+- `epi_grey_panel_init` takes a new `const char** reason`, which may be `NULL`.
+  It gets a short static string on every `EPI_ERR_INVALID_ARG`.
+
+### Added
+
+- `epi_preview_*` reduces rows of ink codes to an RGB preview of any smaller
+  size, averaging in linear light with integer weights, so the output is the
+  same on every platform.
+- `epi_pack_row`, `epi_pack_row_size` and `epi_pack_format_t` pack a row of ink
+  codes for the panel.
+- `epi_colour_panel_init` and `epi_colour_panel_size` build a colour panel from
+  5 to 16 measured inks in caller storage, with no allocation or libm, and the
+  same result on every target. This takes about 6 s on a 240 MHz ESP32-S3. An
+  optional `epi_progress_fn_t` callback can yield to other tasks, or cancel,
+  which returns the new `EPI_ERR_CANCELLED`.
+- `convert` gains `--preview-scale`.
+
+Init rejects inks whose nominal colours disagree with the measurements: a white
+ink (the largest measured Y) whose nominal Y is below another ink's, or a black
+ink (the smallest measured Y) whose nominal Y is above another ink's.
+
+### Tools and packaging
+
+- `panelgen` now runs the library's derivation, so a built-in panel equals the
+  runtime panel from the same inks. It no longer needs numpy or scipy.
+- The component package leaves out `.clang-format`, `.clang-format-ignore`,
+  `.gitignore`, `docs/Doxyfile`, `docs/html` and `docs/xml`.
+
 ## v0.1.1
 
 `epi_panel_t` can now be forward-declared, so a header can use it without
