@@ -828,16 +828,18 @@ integer arithmetic in range:
 - W has no zero channel: `lin_to_lms` divides by each.
 - Every cone response relative to W is in the domain of `epi_cbrt_d`: 0, or in
   [2^-16, 2).
-- Every entry of `lin_to_panel_adapt` fits Q16. A white ink far from neutral with a
-  black ink far above it in X or Z is the only way out of that range.
-- The ray enters the hull; L\*min is at least 0 and has a monotone midtone knee
-  (`epi_midtone_monotone`); L\*max is at most 100; and the interval is at least
-  twice the cusp margin.
+- The ray enters the hull, and L\*min is at least 0 and has a monotone midtone knee
+  (`epi_midtone_monotone`).
 - The probe is outside the hull: if a bisection never moves its upper end, the
   chroma search has no answer.
 - Every cusp is at least 0.5 L\* inside the neutral interval, a margin derived in
   `src/epi_panel_tables.h` from the cusp move's arithmetic ([S5](#s5-gamut-mapping)).
-  The search exits at the first hue that fails.
+  The search exits at the first hue that fails. An interval under 1 L\* fails at the
+  first hue.
+
+Two ranges need no condition. L\*max can't pass 100, because W is on the ray and no
+ink is above it in Y. Every entry of `lin_to_panel_adapt` fits Q16, because M_srgb
+bounds X/Y and Z/Y whatever the inks (`src/epi_colour_panel.c`).
 
 Four inks never pass. With white and black at two vertices of a tetrahedron,
 either the axis has inks on one side only, so the hues on the other have no chroma

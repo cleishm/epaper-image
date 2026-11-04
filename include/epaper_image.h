@@ -307,9 +307,9 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *         ink (the smallest Y) not below white's Y; an ink with twice or more of
  *         a cone response of the white ink's; a neutral axis, the line through
  *         the origin and white, that misses the hull; a neutral range whose
- *         darkest L* is below 0 or 66.29 or more, or that spans under 1 L*; a
- *         probe at chroma 200 inside the hull; or a hue whose most saturated
- *         in-hull colour is within 0.5 L* of the ends of the neutral range;
+ *         darkest L* is below 0 or 66.29 or more; a probe at chroma 200 inside
+ *         the hull; or a hue whose most saturated in-hull colour is within 0.5 L*
+ *         of the ends of the neutral range;
  *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
  *         epi_colour_panel_size(), before the inks are looked at;
  *         EPI_ERR_CANCELLED if @c cfg->progress returned false. @p *out is NULL
