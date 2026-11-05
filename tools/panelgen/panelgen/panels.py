@@ -19,6 +19,7 @@ class Preset:
     adapt: float
     vibrance: float = 1.0
     veil: float = 0.0
+    lift: float = 0.0
 
 
 @dataclass(frozen=True)

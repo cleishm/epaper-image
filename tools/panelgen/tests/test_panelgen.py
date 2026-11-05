@@ -30,8 +30,8 @@ def test_q_rounds_half_away_from_zero():
 def test_preset_check():
     check_presets(EL133UF1)
     limits = dict(tone=0.5, detail=0.75, adapt=0.5)
-    check_presets(replace(EL133UF1, presets=(Preset("x", **{**limits, "tone": 1.0}, vibrance=3.0, veil=3.0),)))
-    for knob, bad in (("tone", 1.5), ("detail", -0.1), ("adapt", 1.1), ("vibrance", 3.1), ("veil", float("nan"))):
+    check_presets(replace(EL133UF1, presets=(Preset("x", **{**limits, "tone": 1.0}, vibrance=3.0, veil=3.0, lift=20.0),)))
+    for knob, bad in (("tone", 1.5), ("detail", -0.1), ("adapt", 1.1), ("vibrance", 3.1), ("veil", float("nan")), ("lift", 20.1)):
         panel = replace(EL133UF1, presets=(Preset("x", **{**limits, knob: bad}),))
         with pytest.raises(PanelError, match=f"{EL133UF1.name}: preset x {knob} "):
             check_presets(panel)

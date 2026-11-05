@@ -175,7 +175,7 @@ void test_converter_validation(void) {
         {.5f, .75f, .5f, 1, 4},
     };
     for (size_t i = 0; i < sizeof bad_vals / sizeof bad_vals[0]; i++) {
-        epi_intent_t in = {bad_vals[i][0], bad_vals[i][1], bad_vals[i][2], bad_vals[i][3], bad_vals[i][4]};
+        epi_intent_t in = {bad_vals[i][0], bad_vals[i][1], bad_vals[i][2], bad_vals[i][3], bad_vals[i][4], 0.0f};
         epi_config_t bi = cfg;
         bi.intent = &in;
         TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_init(&bi, ws, size, &c));

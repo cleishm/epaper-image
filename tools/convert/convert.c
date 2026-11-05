@@ -106,7 +106,7 @@ static const char USAGE[] =
     "  --panel NAME        el133uf1 (default), gdey075t7-mono, gdey075t7-grey4\n"
     "  --list-panels       list the panels and their presets\n"
     "  --preset NAME       one of the panel's presets (default: its first)\n"
-    "  --tone X  --detail X  --adapt X  --vibrance X  --veil X\n"
+    "  --tone X  --detail X  --adapt X  --vibrance X  --veil X  --lift X\n"
     "                      override one value of the preset's intent\n"
     "  --cover             fill the panel, cropping the image (default)\n"
     "  --fit               show the whole image on the background\n"
@@ -173,6 +173,9 @@ static float* intent_field(epi_intent_t* it, const char* key) {
     }
     if (strcmp(key, "veil") == 0) {
         return &it->veil;
+    }
+    if (strcmp(key, "lift") == 0) {
+        return &it->lift;
     }
     return NULL;
 }
@@ -262,8 +265,8 @@ static void print_panels(void) {
 /* Returns 0 to go on, 1 when done (--help, --list-panels), 2 on error. */
 static int parse_args(int argc, char** argv, options_t* o) {
     const char* preset = NULL;
-    const char* values[5] = {0};
-    static const char* const value_keys[5] = {"tone", "detail", "adapt", "vibrance", "veil"};
+    const char* values[6] = {0};
+    static const char* const value_keys[6] = {"tone", "detail", "adapt", "vibrance", "veil", "lift"};
     const char* pos[2 + MAX_CELLS] = {0};
     size_t npos = 0;
 
@@ -366,7 +369,7 @@ static int parse_args(int argc, char** argv, options_t* o) {
             o->seed_set = true;
         } else {
             known = false;
-            for (size_t k = 0; k < 5; k++) {
+            for (size_t k = 0; k < 6; k++) {
                 if (strcmp(a + 2, value_keys[k]) == 0 && strncmp(a, "--", 2) == 0) {
                     values[k] = v;
                     known = true;
@@ -391,7 +394,7 @@ static int parse_args(int argc, char** argv, options_t* o) {
         fprintf(stderr, ")\n");
         return 2;
     }
-    for (size_t k = 0; k < 5; k++) {
+    for (size_t k = 0; k < 6; k++) {
         if (values[k]) {
             if (!parse_float(values[k], intent_field(&o->intent, value_keys[k]))) {
                 return fail("--%s %s: want a number", value_keys[k], values[k]);
@@ -637,12 +640,13 @@ static int write_key(const options_t* o, const size_t* cell_of) {
             fprintf(
                 f,
                 ", \"intent\": {\"tone\": %.9g, \"detail\": %.9g, \"adapt\": %.9g, \"vibrance\": %.9g, "
-                "\"veil\": %.9g}}",
+                "\"veil\": %.9g, \"lift\": %.9g}}",
                 it->tone,
                 it->detail,
                 it->adapt,
                 it->vibrance,
-                it->veil
+                it->veil,
+                it->lift
             );
             first = false;
         }

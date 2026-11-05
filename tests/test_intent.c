@@ -5,6 +5,7 @@
 #include "epaper_image.h"
 #include "epi_intent.h"
 #include "epi_intent_stages.h"
+#include "epi_math.h"
 #include "epi_panel_tables.h"
 #include "test_util.h"
 #include "unity.h"
@@ -88,9 +89,15 @@ void test_intent_init_validation(void) {
         in.veil = bad03[i];
         TEST_ASSERT_EQUAL(EPI_ERR_INVALID_ARG, epi_intent_init(&ctx, tables(), &in));
     }
+    const float bad20[] = {-0.1f, 20.1f, nan};
+    for (size_t i = 0; i < sizeof bad20 / sizeof bad20[0]; i++) {
+        epi_intent_t in = ok;
+        in.lift = bad20[i];
+        TEST_ASSERT_EQUAL(EPI_ERR_INVALID_ARG, epi_intent_init(&ctx, tables(), &in));
+    }
     /* The range ends are valid. */
-    epi_intent_t lo = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    epi_intent_t hi = {1.0f, 1.0f, 1.0f, 3.0f, 3.0f};
+    epi_intent_t lo = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    epi_intent_t hi = {1.0f, 1.0f, 1.0f, 3.0f, 3.0f, 20.0f};
     TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&ctx, tables(), &lo));
     TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&ctx, tables(), &hi));
 }
@@ -292,6 +299,71 @@ void test_intent_veil(void) {
     /* Below L* 90 the veil does nothing. */
     pixel_t g = run_pixel(&in, (epi_rgb_t){119, 119, 119});
     TEST_ASSERT_EQUAL_INT32_ARRAY(g.st.lab_tone, g.st.lab_colour, 3);
+}
+
+/* Lift: the tone curve becomes T(P(L)), the source colour rises with it, and
+ * black, white, the highlights and saturated colours are left alone. */
+void test_intent_lift(void) {
+    epi_intent_t off = *preset(0);
+    epi_intent_t in = off;
+    in.lift = 8.0f;
+    epi_intent_ctx_t c0, c8;
+    TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&c0, tables(), &off));
+    TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&c8, tables(), &in));
+
+    /* L* 35..45 has full weight, so T(40) at lift 8 is T(48) at lift 0; 1/4-L* knots. */
+    TEST_ASSERT_EQUAL_INT32(c0.tone_t_q8[48 * 4], c8.tone_t_q8[40 * 4]);
+    /* Black and everything from L* 82 up keep their curve. */
+    TEST_ASSERT_EQUAL_INT32(c0.tone_t_q8[0], c8.tone_t_q8[0]);
+    for (int i = 82 * 4; i < EPI_TONE_TABLE_LEN; i++) {
+        TEST_ASSERT_EQUAL_INT32(c0.tone_t_q8[i], c8.tone_t_q8[i]);
+    }
+    /* The curve's falling slope around L* 60 is mostly kept out of local contrast by detail 0.75. */
+    TEST_ASSERT_TRUE(c8.tone_g_q16[60 * 4] > 55000);
+
+    /* A muted colour comes out lighter and more colourful; S1's L* and D don't move. */
+    const epi_rgb_t muted = {120, 100, 90};
+    pixel_t m0 = run_pixel(&off, muted);
+    pixel_t m8 = run_pixel(&in, muted);
+    TEST_ASSERT_TRUE(m8.st.lab_tone[0] > m0.st.lab_tone[0]);
+    TEST_ASSERT_EQUAL_INT32(m0.st.lsrc, m8.st.lsrc);
+    TEST_ASSERT_EQUAL_INT32(m0.st.d, m8.st.d);
+    TEST_ASSERT_TRUE(
+        epi_hypot_q(m8.st.lab_tone[1], m8.st.lab_tone[2]) > epi_hypot_q(m0.st.lab_tone[1], m0.st.lab_tone[2])
+    );
+
+    /* A saturated red takes none of it, so it doesn't climb above its ink in white dots. */
+    pixel_t r0 = run_pixel(&off, (epi_rgb_t){170, 30, 30});
+    pixel_t r8 = run_pixel(&in, (epi_rgb_t){170, 30, 30});
+    TEST_ASSERT_EQUAL_INT32_ARRAY(r0.st.lab_tone, r8.st.lab_tone, 3);
+    TEST_ASSERT_EQUAL_INT32_ARRAY(r0.target, r8.target, 3);
+
+    /* Source white, source black and highlights are unchanged. */
+    const epi_rgb_t fixed[] = {{255, 255, 255}, {0, 0, 0}, {215, 215, 215}};
+    for (size_t i = 0; i < sizeof fixed / sizeof fixed[0]; i++) {
+        pixel_t p0 = run_pixel(&off, fixed[i]);
+        pixel_t p8 = run_pixel(&in, fixed[i]);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(p0.st.lab_tone, p8.st.lab_tone, 3);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(p0.target, p8.target, 3);
+    }
+
+    /* At the cap the curve is monotone, and colours driven past the source range end in the hull. */
+    epi_intent_t cap = off;
+    cap.lift = 20.0f;
+    cap.vibrance = 3.0f;
+    epi_intent_ctx_t c20;
+    TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&c20, tables(), &cap));
+    for (int i = 1; i < EPI_TONE_TABLE_LEN; i++) {
+        TEST_ASSERT_TRUE(c20.tone_t_q8[i] >= c20.tone_t_q8[i - 1]);
+    }
+    for (int r = 0; r < 256; r += 51) {
+        for (int g = 0; g < 256; g += 51) {
+            for (int b = 0; b < 256; b += 51) {
+                pixel_t p = run_pixel(&cap, (epi_rgb_t){(uint8_t)r, (uint8_t)g, (uint8_t)b});
+                TEST_ASSERT_TRUE(hull_inside(p.st.xyz));
+            }
+        }
+    }
 }
 
 /* Vibrance at its maximum drives a* b* far out (through the linear branch

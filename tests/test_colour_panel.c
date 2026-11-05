@@ -232,6 +232,7 @@ void test_colour_panel_presets(void) {
         TEST_ASSERT_TRUE(a->intent->adapt == b->intent->adapt);
         TEST_ASSERT_TRUE(a->intent->vibrance == b->intent->vibrance);
         TEST_ASSERT_TRUE(a->intent->veil == b->intent->veil);
+        TEST_ASSERT_TRUE(a->intent->lift == b->intent->lift);
     }
 }
 

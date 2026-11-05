@@ -24,13 +24,16 @@
  * workspace. Holds no pointers except to the (const) panel tables. */
 typedef struct {
     const epi_panel_tables_t* tables;
-    int32_t tone_t_q8[EPI_TONE_TABLE_LEN];  /* T(base), L* Q8 */
-    int32_t tone_g_q16[EPI_TONE_TABLE_LEN]; /* g(base) = T' + d(1 − T'), Q16 */
-    int32_t adapt_q16;                      /* intent adapt */
-    int32_t vibrance_q16;                   /* 65536 = off */
-    int32_t veil_q8;                        /* L* Q8, 0 = off */
-    int32_t white_recip[3];                 /* colour: round(2^40 / white_xyz[c]): X/Xw Q25 = (X Q32 · r) >> 31 */
-    int32_t grey_lstar_min_q8;              /* grey: L*min = L*(level_y[0]), Q8 (0 for colour) */
+    int32_t tone_t_q8[EPI_TONE_TABLE_LEN];     /* T(base), L* Q8 */
+    int32_t tone_g_q16[EPI_TONE_TABLE_LEN];    /* g(base) = T' + d(1 − T'), Q16 */
+    int32_t unlifted_t_q8[EPI_TONE_TABLE_LEN]; /* colour, lift > 0: T and g at lift 0, for saturated colours */
+    int32_t unlifted_g_q16[EPI_TONE_TABLE_LEN];
+    int32_t adapt_q16;         /* intent adapt */
+    int32_t vibrance_q16;      /* 65536 = off */
+    int32_t veil_q8;           /* L* Q8, 0 = off */
+    int32_t lift_q8;           /* L* Q8, 0 = off */
+    int32_t white_recip[3];    /* colour: round(2^40 / white_xyz[c]): X/Xw Q25 = (X Q32 · r) >> 31 */
+    int32_t grey_lstar_min_q8; /* grey: L*min = L*(level_y[0]), Q8 (0 for colour) */
 } epi_intent_ctx_t;
 
 /* Validates the intent (ranges per include/epaper_image.h) and builds the
