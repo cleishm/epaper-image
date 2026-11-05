@@ -305,6 +305,7 @@ void test_intent_veil(void) {
  * black, white, the highlights and saturated colours are left alone. */
 void test_intent_lift(void) {
     epi_intent_t off = *preset(0);
+    off.lift = 0.0f;
     epi_intent_t in = off;
     in.lift = 8.0f;
     epi_intent_ctx_t c0, c8;

@@ -288,7 +288,7 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *
  * The panel offers four presets: Default (tone 0.5), Soft (tone 0), Deep (tone 1)
  * and Vivid (tone 0.5, vibrance 1.3), each with detail 0.75, adapt 0.5, vibrance 1
- * unless stated, veil 0 and lift 0.
+ * unless stated, veil 0 and lift 8.
  *
  * @param cfg     The panel to build.
  * @param storage Storage for the panel.
