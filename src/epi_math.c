@@ -238,7 +238,19 @@ int32_t epi_smoothstep_q16(int32_t x, int32_t lo, int32_t hi) {
     }
     uint64_t num = (uint64_t)((int64_t)x - (int64_t)lo);  /* 0 < num < den */
     uint64_t den = (uint64_t)((int64_t)hi - (int64_t)lo); /* < 2^32 */
-    uint64_t t = ((num << 30) + (den >> 1)) / den;        /* ≤ 2^30 */
+    uint64_t t;                                           /* ≤ 2^30 */
+    if (den < (UINT64_C(1) << 16)) {
+        /* The same quotient in 32 bits: with 2^30 = q·den + r it is
+         * num·q + (num·r + den/2)/den, where num·q < 2^30 and
+         * num·r + den/2 < den² + den < 2^32. */
+        uint32_t d = (uint32_t)den;
+        uint32_t n = (uint32_t)num;
+        uint32_t q = (UINT32_C(1) << 30) / d;
+        uint32_t r = (UINT32_C(1) << 30) - q * d;
+        t = n * q + (n * r + (d >> 1)) / d;
+    } else {
+        t = ((num << 30) + (den >> 1)) / den;
+    }
     uint64_t half = UINT64_C(1) << 29;
     uint64_t t2 = (t * t + half) >> 30;
     uint64_t t3 = (t2 * t + half) >> 30;

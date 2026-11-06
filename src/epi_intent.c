@@ -180,15 +180,29 @@ static inline int32_t veil_lstar(const epi_intent_ctx_t* ctx, int32_t l_q8) {
     return l_q8;
 }
 
-/* Lift, S1: the share of the lift a colour takes, 1 for low chroma down to 0 for saturated. */
+/* Lift, S1: the share of the lift a colour takes, 1 for low chroma down to 0 for saturated. The rounded hypot is at
+ * most k exactly when a² + b² ≤ k·(k + 1) (epi_isqrt64_round), so most colours skip the root. */
 static inline int32_t lift_share(const int32_t lab[3]) {
-    return EPI_Q16_ONE - epi_smoothstep_q16(epi_hypot_q(lab[1], lab[2]), 12 * 256, 32 * 256);
+    const uint64_t lo = 12 * 256, hi = 32 * 256;
+    uint64_t ua = epi_abs32(lab[1]);
+    uint64_t ub = epi_abs32(lab[2]);
+    uint64_t c2 = ua * ua + ub * ub;
+    if (c2 <= lo * (lo + 1)) {
+        return EPI_Q16_ONE;
+    }
+    if (c2 > (hi - 1) * hi) {
+        return 0;
+    }
+    return EPI_Q16_ONE - epi_smoothstep_q16(epi_hypot_q(lab[1], lab[2]), (int32_t)lo, (int32_t)hi);
 }
 
 /* Lift, S1: the source colour scaled at constant chromaticity to the lifted L*, where Y scales by
  * ((L' + 16)/(L + 16))³, clamped so that lin stays in S1's range. The lift is 0 from L* 82 and the curve is monotone,
  * so the Q16 ratio's numerator fits. Returns whether lin changed. */
 static inline int lift_colour(const epi_intent_ctx_t* ctx, int32_t lsrc_q8, int32_t share, int32_t lin[3]) {
+    if (share == 0) {
+        return 0;
+    }
     int32_t w = epi_mul_q16(
         epi_smoothstep_q16(lsrc_q8, 0, 35 * 256), EPI_Q16_ONE - epi_smoothstep_q16(lsrc_q8, 45 * 256, 82 * 256)
     );
