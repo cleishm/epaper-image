@@ -264,7 +264,7 @@ Typical figures:
 Converting a 1600x1200 image to a 1200x1600 colour frame with Lanczos3 takes
 about 0.7 s natively on an Apple silicon laptop and about 1 s as WebAssembly
 under Node. On a 240 MHz ESP32-S3 a photo already at panel size takes about
-45 s, and an 800x480 grey frame takes 3.7 s. Colour times vary with the image:
+47 s, and an 800x480 grey frame takes 3.7 s. Colour times vary with the image:
 colours the panel can't show need a search, so a very saturated photo takes
 longer, up to about twice as long.
 
