@@ -86,7 +86,7 @@ include(FetchContent)
 FetchContent_Declare(
     epaper_image
     GIT_REPOSITORY https://github.com/cleishm/epaper-image.git
-    GIT_TAG v0.2.0
+    GIT_TAG v0.3.0
 )
 FetchContent_MakeAvailable(epaper_image)
 
@@ -256,17 +256,17 @@ Typical figures:
 
 | Configuration | Workspace |
 |---|---|
-| Colour (EL133UF1), 1200 wide | 192 KB |
-| Colour (EL133UF1), 1600 wide | 255 KB |
-| Grey (GDEY075T7), 800 wide | 87 KB |
+| Colour (EL133UF1), 1200 wide | 195 KB |
+| Colour (EL133UF1), 1600 wide | 258 KB |
+| Grey (GDEY075T7), 800 wide | 90 KB |
 | Resampler, 4000x3000 to 1200x1600 | 21 KB (box) to 102 KB (Lanczos3) |
 
 Converting a 1600x1200 image to a 1200x1600 colour frame with Lanczos3 takes
-about 0.6 s natively on an Apple silicon laptop and about 1 s as WebAssembly
-under Node. On a 240 MHz ESP32-S3 it takes about 51 s, and an 800x480 grey frame
-takes 3.7 s. Colour times vary with the image: colours the panel can't show need
-a search, so a very saturated photo takes longer (83 s in the worst case
-measured on the ESP32-S3).
+about 0.7 s natively on an Apple silicon laptop and about 1 s as WebAssembly
+under Node. On a 240 MHz ESP32-S3 a photo already at panel size takes about
+45 s, and an 800x480 grey frame takes 3.7 s. Colour times vary with the image:
+colours the panel can't show need a search, so a very saturated photo takes
+longer, up to about twice as long.
 
 ### Untrusted images
 
@@ -314,7 +314,7 @@ rows with nothing to clean up. Check a deadline or feed a watchdog there.
   configuring), applies a JPEG's EXIF orientation, and writes the packed frame
   for the panel. Options set the panel (`--panel`, `--list-panels`), a preset
   or individual intent values (`--preset`, `--tone`, `--detail`, `--adapt`,
-  `--vibrance`, `--veil`), the layout (`--cover` or `--fit` with
+  `--vibrance`, `--veil`, `--lift`), the layout (`--cover` or `--fit` with
   `--background`), the resampling filter and rotation, and can save a preview
   PNG of what the panel will show (`--preview`, `--nominal`), at a fraction of
   the shown size with `--preview-scale`. `--compare` puts

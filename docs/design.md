@@ -231,7 +231,7 @@ at runtime: colour by `epi_colour_panel_init`, see
 
 The rendering intent (S1–S6, `src/epi_intent.c`) maps each source pixel to a
 target in linear sRGB that lies inside the ink hull. It is controlled by an
-`epi_intent_t` of five knobs, validated in init:
+`epi_intent_t` of six knobs, validated in init:
 
 | knob | range | effect |
 |---|---|---|
@@ -240,9 +240,10 @@ target in linear sRGB that lies inside the ink hull. It is controlled by an
 | `adapt` | 0..1 | adaptation to paper white below the highlights |
 | `vibrance` | 0..3 | chroma gain sparing near-neutrals and skin; 1 is off |
 | `veil` | 0..3 | how far below paper white source white is placed, in L\* units; 0 is off |
+| `lift` | 0..20 | L\* added to lower midtones, fading to nothing by L\* 82 and sparing saturated colours; 0 is off |
 
 Init turns the intent into fixed-point data in the converter's context: the
-tone and gain tables (S3), and adapt, vibrance and veil in Q16, Q16 and Q8.
+tone and gain tables (S3), and adapt, vibrance, veil and lift in Q16, Q16, Q8 and Q8.
 
 Below, ss is smoothstep:
 
@@ -280,6 +281,28 @@ Z/Zn use init-time reciprocals round(2^40/W) instead of a per-pixel division.
 The colour converter stores the source row as sRGB8 and repeats this stage
 when the row's output is computed (see [Streaming and output](#streaming-and-output));
 both evaluations compute L\*src with the same code, so they agree exactly.
+
+**Lift.** The lift raises a pixel's lightness in S3, and its colour has to rise
+with it or lifted areas lose colour: a\* and b\* left as they are read as washed
+out. So where `lift` > 0, the source colour is first scaled at constant
+chromaticity to the lifted lightness, with P the lift curve of S3 and s the
+colour's share of the lift:
+
+```
+s   = 1 − ss(C*, 12, 32)
+L'  = L*src + s · (P(L*src) − L*src)
+lin ← min(lin · ((L' + 16) / (L*src + 16))³, 1)
+```
+
+C\* is that of the panel CIELAB before scaling, which is then recomputed. The
+share exists because of how a saturated colour is drawn. An ink is about as
+light as that colour can be at full chroma, and the red ink is only L\* 43.9.
+Below it, detail is drawn in black dots on the ink; above it, only white dots
+can go lighter. Those stand out far more against the ink, as visible
+pixelation, and displace the dark dots that carry the texture. Saturated
+colours therefore keep their lightness and colour, and only colours of lower
+chroma lift. The clamp keeps linear light in the range S1's arithmetic assumes.
+D and the L\*src used below stay those of the unscaled pixel.
 
 ### S2: base
 
@@ -344,8 +367,28 @@ no valid knee once K reaches 100, at L\*min ≥ 66.29 (a contrast below about
 The tone curve is
 
 ```
-T(L) = (1 − tone) · T0(L) + tone · M(L)
+T(L) = (1 − tone) · T0(P(L)) + tone · M(P(L))
 ```
+
+**P, the lift**, brightens the lower midtones:
+
+```
+P(L) = L + lift · ss(L, 0, 35) · (1 − ss(L, 45, 82))
+```
+
+The weight is 1 between L\* 35 and 45 and fades to 0 by L\* 82, so black and
+the highlights keep their curve and source white still reaches paper white. A
+fixed curve is what a streaming converter can offer: dark images gain most and
+bright ones stay as they are, with no image statistics. P is part of T, not a
+change to L\*src before the blur, so that `detail` governs its effect on local
+contrast as it does the rest of T. On L\*src its slope would scale local contrast
+directly (1.34 to 0.68 at `lift` 8), adding grain in the shadows and losing
+texture in the upper midtones. P is monotone while the weight's steepest fall
+of about 0.04 per L\* leaves its slope positive, which ends near `lift` = 24.7,
+hence the range 0..20. A colour takes s of the lift (S1): its L\* blends
+between the result with P and the result without it, so the context holds a
+second pair of tables at `lift` 0, filled for a colour panel with `lift` > 0.
+Grey has no chroma, so s is 1 and it never uses them.
 
 **Detail.** Applying T pixel by pixel would scale local contrast by T′ along
 with the global range. Instead T is applied to the base, and the pixel's
@@ -484,17 +527,23 @@ same space as the inks' linear sRGB, so the ditherer can mix inks to it.
 A preset is a named `epi_intent_t`; `presets[0]` is the default, used when
 the converter is given no intent. The EL133UF1 offers:
 
-| preset | tone | detail | adapt | vibrance | veil |
-|---|---|---|---|---|---|
-| Default | 0.5 | 0.75 | 0.5 | 1 | 0 |
-| Soft | 0 | 0.75 | 0.5 | 1 | 0 |
-| Deep | 1 | 0.75 | 0.5 | 1 | 0 |
-| Vivid | 0.5 | 0.75 | 0.5 | 1.3 | 0 |
+| preset | tone | detail | adapt | vibrance | veil | lift |
+|---|---|---|---|---|---|---|
+| Default | 0.5 | 0.75 | 0.5 | 1 | 0 | 8 |
+| Soft | 0 | 0.75 | 0.5 | 1 | 0 | 8 |
+| Deep | 1 | 0.75 | 0.5 | 1 | 0 | 8 |
+| Vivid | 0.5 | 0.75 | 0.5 | 1.3 | 0 | 8 |
 
 Soft keeps the image's tonal proportions (pure black-point compensation),
 which lifts shadows; Deep keeps midtones at their source lightness and
 compresses the shadows; Default is halfway. Grey panels offer Default, Soft
-and Deep with the same values (adapt and vibrance have no effect on grey).
+and Deep with the same values but lift 0 (adapt and vibrance have no effect on
+grey).
+
+Paper white is far darker than an LCD's, so unlifted lower midtones read dark
+beside the original; every colour preset lifts, or the presets without it would
+look darker than a lifted Default. Lift 8 is the strength: 4 leaves dark images
+dull, and 12 over-lifts dark skin, washes out fur and loses detail at night.
 
 Tone has the largest effect of any knob. Tone 1 loses detail in dark images, and
 `detail` cannot recover it, because the blur restores texture finer than σ, not
@@ -1184,7 +1233,7 @@ that alignment minus one byte of slack so any start address works:
 
 | block | colour | grey |
 |---|---|---|
-| converter state, incl. intent and ditherer contexts | about 3.5 KB (mostly the tone tables) | same |
+| converter state, incl. intent and ditherer contexts | about 6.7 KB (mostly the tone tables) | same |
 | error row | (W + 2)·3·4 B | (W + 2)·4 B |
 | target row | W·3·4 B | W·4 B |
 | blurred-L\* ring | (2r + 1)·W·2 B | same |

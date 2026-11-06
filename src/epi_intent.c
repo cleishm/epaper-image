@@ -140,7 +140,7 @@ static inline void panel_lab(const epi_intent_ctx_t* ctx, const int32_t lin[3], 
 
 /* T(base) + g(base)·(L*src − base), T and g interpolated linearly between
  * the 1/4-L* knots (64 Q8 LSB apart). */
-static inline int32_t tone_detail(const epi_intent_ctx_t* ctx, int32_t base_q8, int32_t lsrc_q8) {
+static inline int32_t tone_detail(const int32_t* tone_t, const int32_t* tone_g, int32_t base_q8, int32_t lsrc_q8) {
     int32_t b = clamp_i32(base_q8, 0, 100 * 256);
     int32_t i = b >> 6;
     int32_t fr = b & 63;
@@ -148,8 +148,8 @@ static inline int32_t tone_detail(const epi_intent_ctx_t* ctx, int32_t base_q8, 
         i = EPI_TONE_TABLE_LEN - 2;
         fr = 64;
     }
-    int32_t t0 = ctx->tone_t_q8[i], t1 = ctx->tone_t_q8[i + 1];
-    int32_t g0 = ctx->tone_g_q16[i], g1 = ctx->tone_g_q16[i + 1];
+    int32_t t0 = tone_t[i], t1 = tone_t[i + 1];
+    int32_t g0 = tone_g[i], g1 = tone_g[i + 1];
     int32_t tv = t0 + (int32_t)epi_round_shift((int64_t)(t1 - t0) * fr, 6);
     int32_t gv = g0 + (int32_t)epi_round_shift((int64_t)(g1 - g0) * fr, 6);
     return tv + epi_mul_q16(gv, lsrc_q8 - base_q8);
@@ -178,6 +178,44 @@ static inline int32_t veil_lstar(const epi_intent_ctx_t* ctx, int32_t l_q8) {
         l_q8 -= epi_mul_q16(ctx->veil_q8, epi_smoothstep_q16(l_q8, 90 * 256, 100 * 256));
     }
     return l_q8;
+}
+
+/* Lift, S1: the share of the lift a colour takes, 1 for low chroma down to 0 for saturated. The rounded hypot is at
+ * most k exactly when a² + b² ≤ k·(k + 1) (epi_isqrt64_round), so most colours skip the root. */
+static inline int32_t lift_share(const int32_t lab[3]) {
+    const uint64_t lo = 12 * 256, hi = 32 * 256;
+    uint64_t ua = epi_abs32(lab[1]);
+    uint64_t ub = epi_abs32(lab[2]);
+    uint64_t c2 = ua * ua + ub * ub;
+    if (c2 <= lo * (lo + 1)) {
+        return EPI_Q16_ONE;
+    }
+    if (c2 > (hi - 1) * hi) {
+        return 0;
+    }
+    return EPI_Q16_ONE - epi_smoothstep_q16(epi_hypot_q(lab[1], lab[2]), (int32_t)lo, (int32_t)hi);
+}
+
+/* Lift, S1: the source colour scaled at constant chromaticity to the lifted L*, where Y scales by
+ * ((L' + 16)/(L + 16))³, clamped so that lin stays in S1's range. The lift is 0 from L* 82 and the curve is monotone,
+ * so the Q16 ratio's numerator fits. Returns whether lin changed. */
+static inline int lift_colour(const epi_intent_ctx_t* ctx, int32_t lsrc_q8, int32_t share, int32_t lin[3]) {
+    if (share == 0) {
+        return 0;
+    }
+    int32_t w = epi_mul_q16(
+        epi_smoothstep_q16(lsrc_q8, 0, 35 * 256), EPI_Q16_ONE - epi_smoothstep_q16(lsrc_q8, 45 * 256, 82 * 256)
+    );
+    int32_t lift = epi_mul_q16(ctx->lift_q8, epi_mul_q16(w, share));
+    if (lift == 0) {
+        return 0;
+    }
+    int32_t g = div_round_i32((lsrc_q8 + lift + 16 * 256) * 65536, lsrc_q8 + 16 * 256);
+    int32_t k = epi_mul_q16(epi_mul_q16(g, g), g);
+    for (int i = 0; i < 3; i++) {
+        lin[i] = clamp_i32(epi_mul_q16(lin[i], k), 0, EPI_Q16_ONE);
+    }
+    return 1;
 }
 
 /* ---- S5 ----------------------------------------------------------------- */
@@ -333,7 +371,7 @@ double epi_lab_finv_d(double f) {
 }
 
 typedef struct {
-    double wy, by, lmin, knee, tone;
+    double wy, by, lmin, knee, tone, lift;
 } tone_params_t;
 
 /* The midtone curve's Hermite stays monotone (Fritsch–Carlson,
@@ -371,7 +409,15 @@ static double midtone_curve(const tone_params_t* p, double l) {
         (t3 - t2) * k * 1.0;
 }
 
+static double smoothstep_d(double x, double lo, double hi) {
+    double t = (x - lo) / (hi - lo);
+    t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+/* T(P(L)), P the lift (design.md S3). */
 static double tone_curve(const tone_params_t* p, double l) {
+    l += p->lift * smoothstep_d(l, 0.0, 35.0) * (1.0 - smoothstep_d(l, 45.0, 82.0));
     return (1.0 - p->tone) * bpc_lightness(p, l) + p->tone * midtone_curve(p, l);
 }
 
@@ -382,6 +428,17 @@ static int32_t round_d(double x) {
 
 static int in_range(float v, float lo, float hi) {
     return v >= lo && v <= hi; /* false for NaN */
+}
+
+static void tone_tables(const tone_params_t* p, double detail, int32_t* tone_t, int32_t* tone_g) {
+    const double eps = 1e-3;
+    for (int i = 0; i < EPI_TONE_TABLE_LEN; i++) {
+        double l = i * 0.25;
+        double slope = (tone_curve(p, l + eps) - tone_curve(p, l - eps)) / (2.0 * eps);
+        double g = slope + detail * (1.0 - slope);
+        tone_t[i] = round_d(tone_curve(p, l) * 256.0);
+        tone_g[i] = round_d(g * 65536.0);
+    }
 }
 
 int32_t epi_grey_lstar_q8(int32_t y_q16) {
@@ -399,7 +456,7 @@ int epi_midtone_monotone(int32_t lstar_min_q8) {
 epi_err_t epi_intent_init(epi_intent_ctx_t* ctx, const epi_panel_tables_t* tables, const epi_intent_t* intent) {
     if (!in_range(intent->tone, 0.0f, 1.0f) || !in_range(intent->detail, 0.0f, 1.0f) ||
         !in_range(intent->adapt, 0.0f, 1.0f) || !in_range(intent->vibrance, 0.0f, 3.0f) ||
-        !in_range(intent->veil, 0.0f, 3.0f)) {
+        !in_range(intent->veil, 0.0f, 3.0f) || !in_range(intent->lift, 0.0f, 20.0f)) {
         return EPI_ERR_INVALID_ARG;
     }
     const int grey = tables->kind == EPI_PANEL_GREY;
@@ -413,20 +470,19 @@ epi_err_t epi_intent_init(epi_intent_ctx_t* ctx, const epi_panel_tables_t* table
     p.lmin = lmin / 256.0;
     p.knee = midtone_knee(p.lmin);
     p.tone = intent->tone;
+    p.lift = intent->lift;
 
     memset(ctx, 0, sizeof *ctx);
     ctx->tables = tables;
-    const double eps = 1e-3, detail = intent->detail;
-    for (int i = 0; i < EPI_TONE_TABLE_LEN; i++) {
-        double l = i * 0.25;
-        double slope = (tone_curve(&p, l + eps) - tone_curve(&p, l - eps)) / (2.0 * eps);
-        double g = slope + detail * (1.0 - slope);
-        ctx->tone_t_q8[i] = round_d(tone_curve(&p, l) * 256.0);
-        ctx->tone_g_q16[i] = round_d(g * 65536.0);
+    tone_tables(&p, intent->detail, ctx->tone_t_q8, ctx->tone_g_q16);
+    if (!grey && intent->lift > 0.0f) {
+        p.lift = 0.0;
+        tone_tables(&p, intent->detail, ctx->unlifted_t_q8, ctx->unlifted_g_q16);
     }
     ctx->adapt_q16 = round_d((double)intent->adapt * 65536.0);
     ctx->vibrance_q16 = round_d((double)intent->vibrance * 65536.0);
     ctx->veil_q8 = round_d((double)intent->veil * 256.0);
+    ctx->lift_q8 = round_d((double)intent->lift * 256.0);
     if (grey) {
         ctx->grey_lstar_min_q8 = lmin;
     } else {
@@ -503,6 +559,13 @@ static inline void intent_pixel(
     int32_t lsrc = lstar_src(lin);
     int32_t d = adapt_degree(ctx, lsrc);
     panel_lab(ctx, lin, d, lab);
+    int32_t share = EPI_Q16_ONE;
+    if (ctx->lift_q8 > 0) {
+        share = lift_share(lab);
+        if (lift_colour(ctx, lsrc, share, lin)) {
+            panel_lab(ctx, lin, d, lab);
+        }
+    }
     if (st != NULL) {
         st->lsrc = lsrc;
         st->d = d;
@@ -510,7 +573,11 @@ static inline void intent_pixel(
     }
 
     /* S3 */
-    lab[0] = tone_detail(ctx, base_q8, lsrc);
+    lab[0] = tone_detail(ctx->tone_t_q8, ctx->tone_g_q16, base_q8, lsrc);
+    if (share < EPI_Q16_ONE) {
+        int32_t l0 = tone_detail(ctx->unlifted_t_q8, ctx->unlifted_g_q16, base_q8, lsrc);
+        lab[0] = l0 + epi_mul_q16(share, lab[0] - l0);
+    }
     if (st != NULL) {
         copy3(st->lab_tone, lab);
     }
@@ -575,7 +642,7 @@ void epi_intent_grey_row(
 ) {
     const int32_t lmin = ctx->grey_lstar_min_q8;
     for (uint16_t x = 0; x < width; x++) {
-        int32_t l = veil_lstar(ctx, tone_detail(ctx, base_q8[x], lsrc_q8[x]));
+        int32_t l = veil_lstar(ctx, tone_detail(ctx->tone_t_q8, ctx->tone_g_q16, base_q8[x], lsrc_q8[x]));
         l = clamp_i32(l, lmin, 100 * 256);
         target_y_q16[x] = (int32_t)epi_round_shift(lab_finv_q24(lab_fy_q24(l)), 8);
     }

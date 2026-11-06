@@ -19,6 +19,7 @@ class Preset:
     adapt: float
     vibrance: float = 1.0
     veil: float = 0.0
+    lift: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -47,10 +48,10 @@ EL133UF1 = Panel(
     codes=(0, 1, 2, 3, 5, 6),  # code 4 is unused on Spectra 6
     detail_sigma=6.0,
     presets=(
-        Preset("Default", tone=0.5, detail=0.75, adapt=0.5),
-        Preset("Soft", tone=0.0, detail=0.75, adapt=0.5),
-        Preset("Deep", tone=1.0, detail=0.75, adapt=0.5),
-        Preset("Vivid", tone=0.5, detail=0.75, adapt=0.5, vibrance=1.3),
+        Preset("Default", tone=0.5, detail=0.75, adapt=0.5, lift=8.0),
+        Preset("Soft", tone=0.0, detail=0.75, adapt=0.5, lift=8.0),
+        Preset("Deep", tone=1.0, detail=0.75, adapt=0.5, lift=8.0),
+        Preset("Vivid", tone=0.5, detail=0.75, adapt=0.5, vibrance=1.3, lift=8.0),
     ),
     doc='E Ink EL133UF1, Spectra 6, 13.3" 1200x1600 (reTerminal E1004)',
 )

@@ -460,9 +460,9 @@ static void fuzz_converter(int iters) {
             }
             break;
         }
-        epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f};
+        epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f, rf01() * 20.0f};
         if (ru(3) == 0) {
-            in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4)};
+            in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4), (float)ru(21)};
         }
         epi_config_t c = {
             p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(ru(8) ? 120 : 1500)), (uint16_t)(1 + ru(ru(8) ? 80 : 300))
@@ -879,9 +879,10 @@ static void fuzz_colour(int iters) {
             zero_black += inks[i].measured.r == 0 && inks[i].measured.g == 0 && inks[i].measured.b == 0;
         }
         for (int conv = 0; conv < 3; conv++) {
-            epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f};
+            epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f, rf01() * 20.0f};
             if (ru(2) == 0) {
-                in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4)};
+                in =
+                    (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4), (float)ru(21)};
             }
             epi_config_t c = {p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(64)), (uint16_t)(1 + ru(40))};
             size_t cneed = epi_converter_workspace_size(&c);

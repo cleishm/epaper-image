@@ -22,7 +22,7 @@ extern "C" {
 /** @brief Library major version. */
 #define EPI_VERSION_MAJOR 0
 /** @brief Library minor version. */
-#define EPI_VERSION_MINOR 2
+#define EPI_VERSION_MINOR 3
 /** @brief Library patch version. */
 #define EPI_VERSION_PATCH 0
 
@@ -91,6 +91,8 @@ typedef struct {
     float vibrance;
     /** L* below paper white for source white: 0 = off; 0..3. */
     float veil;
+    /** L* added to lower midtones, fading to nothing by L* 82 and sparing saturated colours: 0 = off; 0..20. */
+    float lift;
 } epi_intent_t;
 
 /** @brief A named intent offered for a panel. */
@@ -182,7 +184,7 @@ size_t epi_grey_panel_size(const epi_grey_panel_config_t* cfg);
  *
  * The panel offers three presets: Default (tone 0.5), Soft (tone 0) and
  * Deep (tone 1), each with detail 0.75, adapt 0.5 (ignored on grey),
- * vibrance 1 (ignored on grey) and veil 0.
+ * vibrance 1 (ignored on grey), veil 0 and lift 0.
  *
  * @param cfg     The panel to build.
  * @param storage Storage for the panel.
@@ -286,7 +288,7 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *
  * The panel offers four presets: Default (tone 0.5), Soft (tone 0), Deep (tone 1)
  * and Vivid (tone 0.5, vibrance 1.3), each with detail 0.75, adapt 0.5, vibrance 1
- * unless stated and veil 0.
+ * unless stated, veil 0 and lift 8.
  *
  * @param cfg     The panel to build.
  * @param storage Storage for the panel.

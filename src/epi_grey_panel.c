@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define GREY_INTENT(t) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = 1.0f, .veil = 0.0f}
+#define GREY_INTENT(t) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = 1.0f, .veil = 0.0f, .lift = 0.0f}
 
 static const epi_intent_t grey_intent_default = GREY_INTENT(0.5f);
 static const epi_intent_t grey_intent_soft = GREY_INTENT(0.0f);

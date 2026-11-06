@@ -339,7 +339,9 @@ void test_grey_panel_storage(void) {
         const epi_intent_t* in = p->presets[i].intent;
         TEST_ASSERT_EQUAL_STRING(names[i], p->presets[i].name);
         TEST_ASSERT_TRUE(in->tone == tones[i]);
-        TEST_ASSERT_TRUE(in->detail == 0.75f && in->adapt == 0.5f && in->vibrance == 1.0f && in->veil == 0.0f);
+        TEST_ASSERT_TRUE(
+            in->detail == 0.75f && in->adapt == 0.5f && in->vibrance == 1.0f && in->veil == 0.0f && in->lift == 0.0f
+        );
     }
 
     /* A converter on this panel runs from storage at an odd offset. */
@@ -479,6 +481,23 @@ void test_grey_intent(void) {
     epi_intent_grey_row(&ca, ls, ls, ya, W);
     epi_intent_grey_row(&cb, ls, ls, yb, W);
     TEST_ASSERT_EQUAL_INT32_ARRAY(ya, yb, W);
+}
+
+/* Grey: the lift is in the tone curve; the stored L*src doesn't move. */
+void test_grey_lift(void) {
+    const epi_panel_t* p = panel4();
+    epi_intent_t off = *p->presets[0].intent;
+    epi_intent_t on = off;
+    on.lift = 8.0f;
+    epi_intent_ctx_t c0, c8;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_intent_init(&c0, p->tables, &off));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_intent_init(&c8, p->tables, &on));
+    TEST_ASSERT_EQUAL_INT32(c0.tone_t_q8[48 * 4], c8.tone_t_q8[40 * 4]);
+    int16_t l = 40 * 256, raised = 48 * 256;
+    int32_t y8, yr;
+    epi_intent_grey_row(&c8, &l, &l, &y8, 1);
+    epi_intent_grey_row(&c0, &raised, &raised, &yr, 1);
+    TEST_ASSERT_EQUAL_INT32(yr, y8);
 }
 
 /* ---- grey ditherer ------------------------------------------------------------ */
@@ -1163,7 +1182,7 @@ void test_grey_light_black_knee(void) {
             EPI_OK, epi_grey_panel_init(&cfg, scratch_storage.bytes, sizeof scratch_storage.bytes, &p, NULL)
         );
         for (int t = 0; t <= 4; t++) {
-            epi_intent_t in = {t / 4.0f, 0.75f, 0.5f, 1.0f, 0.0f};
+            epi_intent_t in = {t / 4.0f, 0.75f, 0.5f, 1.0f, 0.0f, 0.0f};
             epi_intent_ctx_t ctx;
             TEST_ASSERT_EQUAL_INT(EPI_OK, epi_intent_init(&ctx, p->tables, &in));
             for (int i = 1; i < EPI_TONE_TABLE_LEN; i++) {

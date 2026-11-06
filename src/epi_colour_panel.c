@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define COLOUR_INTENT(t, v) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = (v), .veil = 0.0f}
+#define COLOUR_INTENT(t, v) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = (v), .veil = 0.0f, .lift = 8.0f}
 
 static const epi_intent_t colour_intent_default = COLOUR_INTENT(0.5f, 1.0f);
 static const epi_intent_t colour_intent_soft = COLOUR_INTENT(0.0f, 1.0f);

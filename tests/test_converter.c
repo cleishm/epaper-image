@@ -175,7 +175,7 @@ void test_converter_validation(void) {
         {.5f, .75f, .5f, 1, 4},
     };
     for (size_t i = 0; i < sizeof bad_vals / sizeof bad_vals[0]; i++) {
-        epi_intent_t in = {bad_vals[i][0], bad_vals[i][1], bad_vals[i][2], bad_vals[i][3], bad_vals[i][4]};
+        epi_intent_t in = {bad_vals[i][0], bad_vals[i][1], bad_vals[i][2], bad_vals[i][3], bad_vals[i][4], 0.0f};
         epi_config_t bi = cfg;
         bi.intent = &in;
         TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_init(&bi, ws, size, &c));
@@ -585,27 +585,26 @@ void test_converter_drain_violation(void) {
 #define GOLDEN_W 157
 #define GOLDEN_H 119
 static const uint64_t goldens[4][4] = {
-    /* gradient */ {
-        UINT64_C(0x0bf5e2077a821170),
-        UINT64_C(0x7f3d52378074de47),
-        UINT64_C(0xf204db3a980a04d2),
-        UINT64_C(0x3780bd0534eb5f6f)
-    },
+    /* gradient */
+    {UINT64_C(0x1e1ee32fa0c19a3b),
+     UINT64_C(0x7e3e724b8020f34e),
+     UINT64_C(0x00f153a7ac7c1952),
+     UINT64_C(0xd173cdf52bd6a2d8)},
     /* hue ramp */
-    {UINT64_C(0x9d4dc2fbdafc4ca7),
-     UINT64_C(0xd2ebbd4e7f3d4665),
-     UINT64_C(0x8d59366fd6be59fb),
-     UINT64_C(0x96f1db3bc27baebf)},
+    {UINT64_C(0xeb0ce46a46d233c0),
+     UINT64_C(0xabef27f76593e7df),
+     UINT64_C(0xbd9cfc7c45f422e5),
+     UINT64_C(0x70219770a57456e1)},
     /* noise */
-    {UINT64_C(0x985efafc0476a139),
-     UINT64_C(0x97cfd80723db6928),
-     UINT64_C(0xbbc6ce0a6b0cd2fb),
-     UINT64_C(0xaabafe48ab064f34)},
+    {UINT64_C(0x3933c1b51b2ae1ad),
+     UINT64_C(0x3f081fc88f92034f),
+     UINT64_C(0xf88449c5d3f511ab),
+     UINT64_C(0x202c6f391544084d)},
     /* page (neutral, so Vivid = Default) */
-    {UINT64_C(0xc8c7ab0c7aa6a1aa),
-     UINT64_C(0x92a4e800aa24848c),
-     UINT64_C(0x0f51ed4cccc2b070),
-     UINT64_C(0xc8c7ab0c7aa6a1aa)},
+    {UINT64_C(0xcae2b79a1fd803c9),
+     UINT64_C(0xb1dba564c2b19f18),
+     UINT64_C(0xf923f6b29d1bc6a8),
+     UINT64_C(0xcae2b79a1fd803c9)},
 };
 
 void test_converter_goldens(void) {

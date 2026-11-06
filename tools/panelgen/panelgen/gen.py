@@ -155,7 +155,7 @@ def check_presets(panel: Panel) -> None:
     if not panel.presets:
         raise PanelError(f"{panel.name}: no presets")
     for pr in panel.presets:
-        for knob, hi in (("tone", 1.0), ("detail", 1.0), ("adapt", 1.0), ("vibrance", 3.0), ("veil", 3.0)):
+        for knob, hi in (("tone", 1.0), ("detail", 1.0), ("adapt", 1.0), ("vibrance", 3.0), ("veil", 3.0), ("lift", 20.0)):
             if not 0.0 <= getattr(pr, knob) <= hi:
                 raise PanelError(f"{panel.name}: preset {pr.name} {knob} {getattr(pr, knob)} outside 0..{hi}")
 
@@ -237,6 +237,7 @@ def render_panel(t: Derived) -> tuple[str, str]:
         out.append(f"    .adapt = {_flt(pr.adapt)},")
         out.append(f"    .vibrance = {_flt(pr.vibrance)},")
         out.append(f"    .veil = {_flt(pr.veil)},")
+        out.append(f"    .lift = {_flt(pr.lift)},")
         out += ["};", ""]
     out.append(f"static const epi_preset_t {pid}_presets[{len(p.presets)}] = {{")
     for pr in p.presets:
