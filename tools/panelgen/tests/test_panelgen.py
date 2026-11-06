@@ -165,10 +165,10 @@ def test_neutral_json_is_an_input(tmp_path, t):
     data["knots"][5][2] -= 1.0  # b* at L* 57.7
     edited = derive(_with_neutral(tmp_path, data))
     assert render_panel(edited)[0] != render_panel(t)[0]
-    # The knot's two segments, L* 52..64, move; nothing else does.
+    # The knot's two segments, L* 52..61, move; nothing else does.
     old, new = t.ints["neutral_q8"], edited.ints["neutral_q8"]
-    assert [i for i in range(101) if new[i] != old[i]] == list(range(52, 65))
-    assert all(new[i][1] < old[i][1] and new[i][0] == old[i][0] for i in range(52, 65))
+    assert [i for i in range(101) if new[i] != old[i]] == list(range(52, 61))
+    assert all(new[i][1] < old[i][1] and new[i][0] == old[i][0] for i in range(52, 61))
 
 
 def test_no_neutral_json_no_table():

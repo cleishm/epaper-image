@@ -586,25 +586,25 @@ void test_converter_drain_violation(void) {
 #define GOLDEN_H 119
 static const uint64_t goldens[4][4] = {
     /* gradient */
-    {UINT64_C(0x341168798e0be9a4),
-     UINT64_C(0x8d562bd71a500f8f),
-     UINT64_C(0x5617dc72e6528cef),
-     UINT64_C(0xbcf3e29fe1c1f4bc)},
+    {UINT64_C(0x71d853f5df39050a),
+     UINT64_C(0xdfd49792591acb72),
+     UINT64_C(0x6f0b5975a7c50dd7),
+     UINT64_C(0x7ced738c2c2ffdb1)},
     /* hue ramp */
-    {UINT64_C(0x3eee4082e42ab796),
-     UINT64_C(0xcf1fa89700f9cf83),
-     UINT64_C(0xd27727c31c7f5e40),
+    {UINT64_C(0x06036531f947a83a),
+     UINT64_C(0x778fd2d326629ae3),
+     UINT64_C(0x30273a18d52401f4),
      UINT64_C(0xc8caaa06fabd37ce)},
     /* noise */
-    {UINT64_C(0x90d8e29535660eb3),
-     UINT64_C(0xbd3671fe036900ae),
-     UINT64_C(0x0f470c3ecb523c51),
-     UINT64_C(0xa183ba3f93c94efe)},
+    {UINT64_C(0xa1b6a0f6c97a6e37),
+     UINT64_C(0xf6e27789aee81202),
+     UINT64_C(0x81882e852209af42),
+     UINT64_C(0x139e89b3ac264a39)},
     /* page (neutral, so Vivid = Default) */
-    {UINT64_C(0x9cb2c9a745621a27),
-     UINT64_C(0x4158ddccd2aa139c),
-     UINT64_C(0xa564c04e88085f3a),
-     UINT64_C(0x9cb2c9a745621a27)},
+    {UINT64_C(0x6b8fb336aaf4a1b4),
+     UINT64_C(0x70d8c82189cba1b5),
+     UINT64_C(0x3ea79ade10084607),
+     UINT64_C(0x6b8fb336aaf4a1b4)},
 };
 
 /* The same with the panel's neutral cast cleared (has_neutral 0): the output of a

@@ -94,17 +94,20 @@ static const epi_panel_t* build(storage_t* st, const epi_ink_t* inks, size_t n, 
 
 /* The knots of tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json, which
  * panelgen derives the shipped table from. */
-static const epi_neutral_knot_t el133_neutral[11] = {
+static const epi_neutral_knot_t el133_neutral[14] = {
     {36.0f, 0.0f, 0.0f},
     {39.4f, 0.0f, -1.2f},
     {42.7f, 0.6f, -5.1f},
     {46.8f, 1.0f, -6.5f},
     {51.9f, 1.6f, -9.7f},
     {57.7f, 4.7f, -13.5f},
+    {61.0f, 6.5f, -11.7f},
     {64.4f, 4.3f, -9.8f},
     {71.3f, 3.8f, -8.6f},
     {78.2f, 2.7f, -8.5f},
-    {85.0f, 2.9f, -8.0f},
+    {81.0f, 2.0f, -6.2f},
+    {86.0f, 2.0f, -4.8f},
+    {91.0f, 0.8f, -2.3f},
     {93.4f, 0.0f, 0.0f},
 };
 
@@ -118,7 +121,7 @@ static const epi_panel_t* panel_el133(void) {
             epi_panel_el133uf1.ink_count,
             epi_panel_el133uf1.detail_sigma,
             el133_neutral,
-            11
+            14
         );
     }
     return p;
@@ -642,7 +645,7 @@ void test_colour_panel_progress(void) {
     const char* why;
 
     pr.cancel_at = 1;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 14, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(1, pr.calls);
@@ -650,7 +653,7 @@ void test_colour_panel_progress(void) {
 
     /* Counts to the end, then the same panel as the generated one. */
     pr.cancel_at = 0;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, init_probed(&st, inks, n, sigma, el133_neutral, 14, &pr, &p, &why));
     TEST_ASSERT_NOT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(360, pr.calls);
@@ -659,7 +662,7 @@ void test_colour_panel_progress(void) {
 
     /* A false on the last call cancels too. */
     pr.cancel_at = 360;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 14, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(360, pr.calls);
