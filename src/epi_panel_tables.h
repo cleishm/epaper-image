@@ -18,6 +18,8 @@
 #define EPI_MAX_INKS 16
 #define EPI_MAX_HULL_FACES 32
 #define EPI_MAX_KERNEL_RADIUS 32
+#define EPI_MAX_NEUTRAL_KNOTS 16
+#define EPI_NEUTRAL_LEN 101 /* neutral_q8 entries, at integer L* 0..100 */
 
 /*
  * How far inside the neutral interval every cusp must be, in Q8 L* (0.5 L*), so
@@ -31,7 +33,7 @@
  *   lab_to_xyz's ±(2^17 − 1) applies only to its own copies. panel_lab gives
  *   f in [−2^18, 2^21] (lab_f_q19 of an int32 ratio), so |a| ≤ 500·(2^21 + 2^18)
  *   / 2^11 = 576000 and |b| ≤ 230400 in Q8; vibrance multiplies both by at most
- *   3, so c < 2^29.
+ *   3 and the neutral cast adds at most 30·2^8, so c < 2^29.
  *   e1 = k/2 + |ld| + round(c·span/(20·k))
  *      ≤ 2·span + 2^29·100·2^16/(20·2^16) + 1 < 2.7e9 < 2^31.5,
  *   so e1·e1 fits int64, and 2·k·|ld| ≤ k² ≤ (2·span)² < 2^48.
@@ -72,6 +74,11 @@ typedef struct {
     int32_t ink_lin[EPI_MAX_INKS][3];      /* Q16: measured inks, linear sRGB */
     int32_t ink_oklab[EPI_MAX_INKS][3];    /* Q16: measured inks, ink-relative OKLab */
     int32_t nhat[3];                       /* Q16: white_lin / |white_lin| */
+    /* Neutral-cast correction (design.md "Neutral cast"): the a*, b* offset at
+     * integer L* 0..100, Q8, linear in L* between entries. All zero, and the
+     * stage skipped, unless has_neutral. */
+    uint8_t has_neutral;
+    int16_t neutral_q8[EPI_NEUTRAL_LEN][2];
 } epi_colour_tables_t;
 
 /* Grey panels (built by epi_grey_panel_init, src/epi_grey_panel.c, or generated). */

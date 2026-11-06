@@ -1,0 +1,17 @@
+{
+  "panel": "el133uf1",
+  "source": "Grey ramp and nulling chart photos plus blind nulling picks on the E1004, mapped through the library's S1-S4 at Default, lift 0",
+  "knots": [
+    [36.0, 0.0, 0.0],
+    [39.4, 0.0, -1.2],
+    [42.7, 0.6, -5.1],
+    [46.8, 1.0, -6.5],
+    [51.9, 1.6, -9.7],
+    [57.7, 4.7, -13.5],
+    [64.4, 4.3, -9.8],
+    [71.3, 3.8, -8.6],
+    [78.2, 2.7, -8.5],
+    [85.0, 2.9, -8.0],
+    [93.4, 0.0, 0.0]
+  ]
+}

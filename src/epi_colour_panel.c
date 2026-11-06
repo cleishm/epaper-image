@@ -523,8 +523,33 @@ static bool ink_tables(const epi_ink_t* inks, size_t n, const double wl[3], epi_
     return true;
 }
 
+/* The neutral-cast offsets at integer L*: the knots (valid_config's rules)
+ * interpolated linearly, zero outside the first and last. */
+static void neutral_table(const epi_neutral_knot_t* knots, size_t n, epi_colour_tables_t* t) {
+    t->has_neutral = n > 0;
+    for (int i = 0; i < EPI_NEUTRAL_LEN && n > 0; i++) {
+        const double l = i;
+        if (l < knots[0].lstar || l > knots[n - 1].lstar) {
+            continue;
+        }
+        size_t k = 0;
+        while (k + 1 < n && knots[k + 1].lstar <= l) {
+            k++;
+        }
+        double a = knots[k].a, b = knots[k].b;
+        if (k + 1 < n) {
+            const double f = (l - knots[k].lstar) / ((double)knots[k + 1].lstar - knots[k].lstar);
+            a += f * ((double)knots[k + 1].a - knots[k].a);
+            b += f * ((double)knots[k + 1].b - knots[k].b);
+        }
+        t->neutral_q8[i][0] = (int16_t)q_round(a, Q8);
+        t->neutral_q8[i][1] = (int16_t)q_round(b, Q8);
+    }
+}
+
 /*
- * Derives the colour tables of n inks (at most 16) from their measured colours. *t
+ * Derives the colour tables of n inks (at most 16) from their measured colours, and
+ * the neutral-cast table from knot_count knots (valid_config's rules). *t
  * must be zeroed; everything but the detail kernel is written. Returns EPI_OK;
  * EPI_ERR_INVALID_ARG if the inks can't make a panel, with a short static reason in
  * *why; or EPI_ERR_CANCELLED if progress (optional) returned false. *t is unspecified
@@ -533,11 +558,14 @@ static bool ink_tables(const epi_ink_t* inks, size_t n, const double wl[3], epi_
 static epi_err_t epi_colour_tables_derive(
     const epi_ink_t* inks,
     size_t n,
+    const epi_neutral_knot_t* knots,
+    size_t knot_count,
     epi_colour_tables_t* t,
     const char** why,
     epi_progress_fn_t progress,
     void* progress_ctx
 ) {
+    neutral_table(knots, knot_count, t);
     hull_t h;
     size_t iw, ib;
     double w[3], b[3];
@@ -626,6 +654,25 @@ static const char* valid_config(const epi_colour_panel_config_t* cfg) {
     if (!(cfg->detail_sigma > 0.0f && cfg->detail_sigma <= 10.5f)) {
         return "detail sigma outside (0, 10.5]";
     }
+    if (cfg->neutral_count > EPI_MAX_NEUTRAL_KNOTS) {
+        return "more than 16 neutral knots";
+    }
+    if ((cfg->neutral == NULL) != (cfg->neutral_count == 0)) {
+        return "neutral knots and neutral count disagree";
+    }
+    /* The range tests are false for NaN, and exclude infinities. */
+    for (size_t i = 0; i < cfg->neutral_count; i++) {
+        const epi_neutral_knot_t* k = &cfg->neutral[i];
+        if (!(k->lstar >= 0.0f && k->lstar <= 100.0f)) {
+            return "neutral knot L* outside [0, 100]";
+        }
+        if (!(k->a >= -30.0f && k->a <= 30.0f && k->b >= -30.0f && k->b <= 30.0f)) {
+            return "neutral knot a* or b* outside [-30, 30]";
+        }
+        if (i > 0 && !(k->lstar > cfg->neutral[i - 1].lstar)) {
+            return "neutral knot L* not strictly ascending";
+        }
+    }
     return NULL;
 }
 
@@ -670,7 +717,9 @@ epi_err_t epi_colour_panel_init(
 
     epi_colour_tables_t* t = &s->tables;
     const char* why;
-    const epi_err_t err = epi_colour_tables_derive(s->inks, n, t, &why, cfg->progress, cfg->progress_ctx);
+    const epi_err_t err = epi_colour_tables_derive(
+        s->inks, n, cfg->neutral, cfg->neutral_count, t, &why, cfg->progress, cfg->progress_ctx
+    );
     if (err != EPI_OK) {
         if (err == EPI_ERR_INVALID_ARG && reason != NULL) {
             *reason = why;

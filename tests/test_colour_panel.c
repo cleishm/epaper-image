@@ -7,6 +7,8 @@
  * other than EL133UF1's are plausible measured inks, not calibrations.
  */
 #include "epaper_image.h"
+#include "epi_intent.h"
+#include "epi_intent_stages.h"
 #include "epi_math.h"
 #include "epi_panel_tables.h"
 #include "test_util.h"
@@ -68,8 +70,15 @@ typedef union {
 } storage_t;
 
 /* Built off alignment on purpose: the storage needs no particular alignment. */
-static const epi_panel_t* build(storage_t* st, const epi_ink_t* inks, size_t n, float sigma) {
-    epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, sigma, NULL, NULL};
+static const epi_panel_t* build_neutral(
+    storage_t* st,
+    const epi_ink_t* inks,
+    size_t n,
+    float sigma,
+    const epi_neutral_knot_t* knots,
+    size_t knot_count
+) {
+    epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, sigma, NULL, NULL, knots, knot_count};
     size_t size = epi_colour_panel_size(&cfg);
     TEST_ASSERT_NOT_EQUAL(0, size);
     TEST_ASSERT_TRUE(size + 3 <= sizeof st->bytes);
@@ -79,11 +88,38 @@ static const epi_panel_t* build(storage_t* st, const epi_ink_t* inks, size_t n, 
     return p;
 }
 
+static const epi_panel_t* build(storage_t* st, const epi_ink_t* inks, size_t n, float sigma) {
+    return build_neutral(st, inks, n, sigma, NULL, 0);
+}
+
+/* The knots of tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json, which
+ * panelgen derives the shipped table from. */
+static const epi_neutral_knot_t el133_neutral[11] = {
+    {36.0f, 0.0f, 0.0f},
+    {39.4f, 0.0f, -1.2f},
+    {42.7f, 0.6f, -5.1f},
+    {46.8f, 1.0f, -6.5f},
+    {51.9f, 1.6f, -9.7f},
+    {57.7f, 4.7f, -13.5f},
+    {64.4f, 4.3f, -9.8f},
+    {71.3f, 3.8f, -8.6f},
+    {78.2f, 2.7f, -8.5f},
+    {85.0f, 2.9f, -8.0f},
+    {93.4f, 0.0f, 0.0f},
+};
+
 static const epi_panel_t* panel_el133(void) {
     static storage_t st;
     static const epi_panel_t* p;
     if (p == NULL) {
-        p = build(&st, epi_panel_el133uf1.inks, epi_panel_el133uf1.ink_count, epi_panel_el133uf1.detail_sigma);
+        p = build_neutral(
+            &st,
+            epi_panel_el133uf1.inks,
+            epi_panel_el133uf1.ink_count,
+            epi_panel_el133uf1.detail_sigma,
+            el133_neutral,
+            11
+        );
     }
     return p;
 }
@@ -111,7 +147,7 @@ static const epi_panel_t* panel_cube(void) {
 void test_colour_panel_validation(void) {
     static storage_t st;
     const epi_panel_t sentinel = {0};
-    const epi_colour_panel_config_t ok = {"TEST", 800, 480, inks5, 5, 6.0f, NULL, NULL};
+    const epi_colour_panel_config_t ok = {"TEST", 800, 480, inks5, 5, 6.0f, NULL, NULL, NULL, 0};
     size_t size = epi_colour_panel_size(&ok);
     TEST_ASSERT_NOT_EQUAL(0, size);
 
@@ -130,7 +166,7 @@ void test_colour_panel_validation(void) {
     TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_colour_panel_init(&ok, st.bytes, size, NULL, &why));
     TEST_ASSERT_EQUAL_STRING("storage or out is NULL", why);
     /* An invalid config is reported as such even when the storage is NULL too. */
-    const epi_colour_panel_config_t four_inks = {"TEST", 800, 480, inks5, 4, 6.0f, NULL, NULL};
+    const epi_colour_panel_config_t four_inks = {"TEST", 800, 480, inks5, 4, 6.0f, NULL, NULL, NULL, 0};
     why = "stale";
     TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_colour_panel_init(&four_inks, NULL, 0, &p, &why));
     TEST_ASSERT_EQUAL_STRING("a colour panel needs 5 to 16 inks", why);
@@ -173,8 +209,42 @@ void test_colour_panel_validation(void) {
 
     static const char* const count_reason = "a colour panel needs 5 to 16 inks";
     static const char* const sigma_reason = "detail sigma outside (0, 10.5]";
-    const char* bad_reason[12];
-    epi_colour_panel_config_t bad[12];
+    static const char* const knot_l_reason = "neutral knot L* outside [0, 100]";
+    static const char* const knot_ab_reason = "neutral knot a* or b* outside [-30, 30]";
+    static const char* const knot_order_reason = "neutral knot L* not strictly ascending";
+    const float qnan = bits_f(0x7FC00000u), finf = bits_f(0x7F800000u);
+    epi_neutral_knot_t knots[17];
+    for (int i = 0; i < 17; i++) {
+        knots[i] = (epi_neutral_knot_t){(float)(i * 6), 1.0f, -1.0f};
+    }
+    /* Two knots, one value of which breaks a rule. */
+    const epi_neutral_knot_t bad_knots[][2] = {
+        {{-0.1f, 0, 0}, {50, 0, 0}},
+        {{0, 0, 0}, {100.1f, 0, 0}},
+        {{qnan, 0, 0}, {50, 0, 0}},
+        {{0, 0, 0}, {finf, 0, 0}},
+        {{10, 30.1f, 0}, {50, 0, 0}},
+        {{10, 0, 0}, {50, 0, -30.1f}},
+        {{10, qnan, 0}, {50, 0, 0}},
+        {{10, 0, -finf}, {50, 0, 0}},
+        {{50, 0, 0}, {50, 0, 0}},
+        {{50, 0, 0}, {40, 0, 0}},
+    };
+    const char* const bad_knot_reason[] = {
+        knot_l_reason,
+        knot_l_reason,
+        knot_l_reason,
+        knot_l_reason,
+        knot_ab_reason,
+        knot_ab_reason,
+        knot_ab_reason,
+        knot_ab_reason,
+        knot_order_reason,
+        knot_order_reason,
+    };
+    enum { NBAD_KNOTS = sizeof bad_knots / sizeof bad_knots[0] };
+    const char* bad_reason[15 + NBAD_KNOTS];
+    epi_colour_panel_config_t bad[15 + NBAD_KNOTS];
     size_t nbad = 0;
     bad_reason[nbad] = "name or inks is NULL";
     bad[nbad] = ok, bad[nbad++].name = NULL;
@@ -200,6 +270,17 @@ void test_colour_panel_validation(void) {
     bad[nbad] = ok, bad[nbad++].detail_sigma = bits_f(0x7F800000u); /* inf */
     bad_reason[nbad] = sigma_reason;
     bad[nbad] = ok, bad[nbad++].detail_sigma = bits_f(0x7FC00000u); /* NaN */
+    bad_reason[nbad] = "more than 16 neutral knots";
+    bad[nbad] = ok, bad[nbad].neutral = knots, bad[nbad++].neutral_count = 17;
+    bad_reason[nbad] = "neutral knots and neutral count disagree";
+    bad[nbad] = ok, bad[nbad++].neutral_count = 1;
+    bad_reason[nbad] = "neutral knots and neutral count disagree";
+    bad[nbad] = ok, bad[nbad++].neutral = knots;
+    for (size_t i = 0; i < NBAD_KNOTS; i++) {
+        bad_reason[nbad] = bad_knot_reason[i];
+        bad[nbad] = ok, bad[nbad].neutral = bad_knots[i], bad[nbad++].neutral_count = 2;
+    }
+    TEST_ASSERT_EQUAL_size_t(sizeof bad / sizeof bad[0], nbad);
     for (size_t i = 0; i < nbad; i++) {
         TEST_ASSERT_EQUAL_size_t(0, epi_colour_panel_size(&bad[i]));
         p = &sentinel;
@@ -213,9 +294,17 @@ void test_colour_panel_validation(void) {
     static const epi_ink_t all_black[5] = {
         INK(0, 0, 0, 0), INK(1, 0, 0, 0), INK(2, 0, 0, 0), INK(3, 0, 0, 0), INK(4, 0, 0, 0)
     };
-    epi_colour_panel_config_t cfg = {"TEST", 1, 1, all_black, 5, FLT_TRUE_MIN, NULL, NULL};
+    epi_colour_panel_config_t cfg = {"TEST", 1, 1, all_black, 5, FLT_TRUE_MIN, NULL, NULL, NULL, 0};
     TEST_ASSERT_EQUAL_size_t(size, epi_colour_panel_size(&cfg));
     cfg.detail_sigma = 10.5f;
+    TEST_ASSERT_EQUAL_size_t(size, epi_colour_panel_size(&cfg));
+    /* The knots' range ends, and the most knots. */
+    const epi_neutral_knot_t ends[2] = {{0.0f, -30.0f, 30.0f}, {100.0f, 30.0f, -30.0f}};
+    cfg.neutral = ends;
+    cfg.neutral_count = 2;
+    TEST_ASSERT_EQUAL_size_t(size, epi_colour_panel_size(&cfg));
+    cfg.neutral = knots;
+    cfg.neutral_count = 16;
     TEST_ASSERT_EQUAL_size_t(size, epi_colour_panel_size(&cfg));
 }
 
@@ -263,6 +352,8 @@ static void assert_tables_equal_generated(const epi_panel_t* p) {
     TEST_ASSERT_EQUAL_INT32_ARRAY(&r->ink_lin[0][0], &t->ink_lin[0][0], 3 * EPI_MAX_INKS);
     TEST_ASSERT_EQUAL_INT32_ARRAY(&r->ink_oklab[0][0], &t->ink_oklab[0][0], 3 * EPI_MAX_INKS);
     TEST_ASSERT_EQUAL_INT32_ARRAY(r->nhat, t->nhat, 3);
+    TEST_ASSERT_EQUAL_UINT8(r->has_neutral, t->has_neutral);
+    TEST_ASSERT_EQUAL_INT16_ARRAY(&r->neutral_q8[0][0], &t->neutral_q8[0][0], 2 * EPI_NEUTRAL_LEN);
 }
 
 void test_colour_panel_el133uf1(void) {
@@ -274,12 +365,65 @@ void test_colour_panel_el133uf1(void) {
     assert_tables_equal_generated(p);
 }
 
+/* ---- the neutral cast ------------------------------------------------------------ */
+
+void test_colour_panel_neutral(void) {
+    /* Each knot's offset lands at its L*, linear between knots, zero outside them. */
+    storage_t st;
+    const epi_neutral_knot_t knots[3] = {{20.0f, 3.0f, -3.0f}, {40.0f, -6.0f, 9.5f}, {70.0f, 1.0f, 2.0f}};
+    const epi_colour_tables_t* t = epi_colour_tables(build_neutral(&st, inks5, 5, 2.0f, knots, 3)->tables);
+    TEST_ASSERT_EQUAL_UINT8(1, t->has_neutral);
+    static const struct {
+        int l;
+        int16_t a, b;
+    } want[] = {
+        {20, 768, -768},   /* knot */
+        {25, 192, 32},     /* (0.75, 0.125) */
+        {30, -384, 832},   /* (-1.5, 3.25) */
+        {40, -1536, 2432}, /* knot */
+        {55, -640, 1472},  /* (-2.5, 5.75) */
+        {70, 256, 512},    /* knot */
+    };
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+        TEST_ASSERT_EQUAL_INT16(want[i].a, t->neutral_q8[want[i].l][0]);
+        TEST_ASSERT_EQUAL_INT16(want[i].b, t->neutral_q8[want[i].l][1]);
+    }
+    for (int l = 0; l < EPI_NEUTRAL_LEN; l++) {
+        if (l < 20 || l > 70) {
+            TEST_ASSERT_EQUAL_INT16(0, t->neutral_q8[l][0]);
+            TEST_ASSERT_EQUAL_INT16(0, t->neutral_q8[l][1]);
+        }
+    }
+
+    /* Without knots there is no table, and the stage leaves every colour as S4 made it. */
+    const epi_panel_t* p = panel_inks7();
+    const epi_colour_tables_t* t7 = epi_colour_tables(p->tables);
+    TEST_ASSERT_EQUAL_UINT8(0, t7->has_neutral);
+    for (int l = 0; l < EPI_NEUTRAL_LEN; l++) {
+        TEST_ASSERT_EQUAL_INT16(0, t7->neutral_q8[l][0]);
+        TEST_ASSERT_EQUAL_INT16(0, t7->neutral_q8[l][1]);
+    }
+    epi_intent_ctx_t ctx;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_intent_init(&ctx, p->tables, p->presets[0].intent));
+    for (int v = 0; v < 256; v += 17) {
+        const epi_rgb_t cols[2] = {{(uint8_t)v, (uint8_t)v, (uint8_t)v}, {(uint8_t)v, 128, (uint8_t)(255 - v)}};
+        for (int c = 0; c < 2; c++) {
+            int16_t ls;
+            int32_t target[3];
+            epi_intent_stages_t stages;
+            epi_intent_lstar_row(&cols[c], &ls, 1);
+            epi_intent_pixel_stages(&ctx, &cols[c], ls, target, &stages);
+            TEST_ASSERT_EQUAL_INT32_ARRAY(stages.lab_colour, stages.lab_neutral, 3);
+        }
+    }
+}
+
 /* ---- rejected inks -------------------------------------------------------------- */
 
 static void assert_rejected(const epi_ink_t* inks, size_t n, const char* reason) {
     static storage_t st;
     /* Sizing doesn't look at the inks. */
-    const epi_colour_panel_config_t cfg = {"TEST", 800, 480, inks, n, 6.0f, NULL, NULL};
+    const epi_colour_panel_config_t cfg = {"TEST", 800, 480, inks, n, 6.0f, NULL, NULL, NULL, 0};
     TEST_ASSERT_NOT_EQUAL(0, epi_colour_panel_size(&cfg));
     const epi_panel_t sentinel = {0};
     const epi_panel_t* p = &sentinel;
@@ -394,7 +538,7 @@ void test_colour_panel_black_is_darkest_nominal(void) {
 
 /* Why init rejected the inks; NULL if it accepted them. */
 static const char* init_reason(storage_t* st, const epi_ink_t* inks, size_t n) {
-    const epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, 6.0f, NULL, NULL};
+    const epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, 6.0f, NULL, NULL, NULL, 0};
     const epi_panel_t* p = NULL;
     const char* why = NULL;
     epi_colour_panel_init(&cfg, st->bytes, sizeof st->bytes, &p, &why);
@@ -470,11 +614,13 @@ static epi_err_t init_probed(
     const epi_ink_t* inks,
     size_t n,
     float sigma,
+    const epi_neutral_knot_t* knots,
+    size_t knot_count,
     probe_t* pr,
     const epi_panel_t** p,
     const char** why
 ) {
-    epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, sigma, probe_progress, pr};
+    epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, sigma, probe_progress, pr, knots, knot_count};
     pr->self = pr;
     pr->calls = 0;
     pr->bad = 0;
@@ -496,7 +642,7 @@ void test_colour_panel_progress(void) {
     const char* why;
 
     pr.cancel_at = 1;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(1, pr.calls);
@@ -504,7 +650,7 @@ void test_colour_panel_progress(void) {
 
     /* Counts to the end, then the same panel as the generated one. */
     pr.cancel_at = 0;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, init_probed(&st, inks, n, sigma, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
     TEST_ASSERT_NOT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(360, pr.calls);
@@ -513,7 +659,7 @@ void test_colour_panel_progress(void) {
 
     /* A false on the last call cancels too. */
     pr.cancel_at = 360;
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_CANCELLED, init_probed(&st, inks, n, sigma, el133_neutral, 11, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_NULL(why);
     TEST_ASSERT_EQUAL_UINT(360, pr.calls);
@@ -535,12 +681,12 @@ void test_colour_panel_progress_rejected(void) {
         INK(3, 100, 100, 100),
         INK(4, 100, 100, 100)
     };
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, init_probed(&st, identical, 5, 6.0f, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, init_probed(&st, identical, 5, 6.0f, NULL, 0, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_EQUAL_STRING("inks do not span three dimensions", why);
     TEST_ASSERT_EQUAL_UINT(0, pr.calls);
 
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, init_probed(&st, tinted_black, 5, 6.0f, &pr, &p, &why));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, init_probed(&st, tinted_black, 5, 6.0f, NULL, 0, &pr, &p, &why));
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_EQUAL_STRING(TINTED_BLACK_REASON, why);
     TEST_ASSERT_TRUE(pr.calls < 360);

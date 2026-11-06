@@ -586,6 +586,31 @@ void test_converter_drain_violation(void) {
 #define GOLDEN_H 119
 static const uint64_t goldens[4][4] = {
     /* gradient */
+    {UINT64_C(0x341168798e0be9a4),
+     UINT64_C(0x8d562bd71a500f8f),
+     UINT64_C(0x5617dc72e6528cef),
+     UINT64_C(0xbcf3e29fe1c1f4bc)},
+    /* hue ramp */
+    {UINT64_C(0x3eee4082e42ab796),
+     UINT64_C(0xcf1fa89700f9cf83),
+     UINT64_C(0xd27727c31c7f5e40),
+     UINT64_C(0xc8caaa06fabd37ce)},
+    /* noise */
+    {UINT64_C(0x90d8e29535660eb3),
+     UINT64_C(0xbd3671fe036900ae),
+     UINT64_C(0x0f470c3ecb523c51),
+     UINT64_C(0xa183ba3f93c94efe)},
+    /* page (neutral, so Vivid = Default) */
+    {UINT64_C(0x9cb2c9a745621a27),
+     UINT64_C(0x4158ddccd2aa139c),
+     UINT64_C(0xa564c04e88085f3a),
+     UINT64_C(0x9cb2c9a745621a27)},
+};
+
+/* The same with the panel's neutral cast cleared (has_neutral 0): the output of a
+ * panel without one, which the stage must leave bit for bit. */
+static const uint64_t goldens_without_neutral[4][4] = {
+    /* gradient */
     {UINT64_C(0x1e1ee32fa0c19a3b),
      UINT64_C(0x7e3e724b8020f34e),
      UINT64_C(0x00f153a7ac7c1952),
@@ -600,19 +625,19 @@ static const uint64_t goldens[4][4] = {
      UINT64_C(0x3f081fc88f92034f),
      UINT64_C(0xf88449c5d3f511ab),
      UINT64_C(0x202c6f391544084d)},
-    /* page (neutral, so Vivid = Default) */
+    /* page */
     {UINT64_C(0xcae2b79a1fd803c9),
      UINT64_C(0xb1dba564c2b19f18),
      UINT64_C(0xf923f6b29d1bc6a8),
      UINT64_C(0xcae2b79a1fd803c9)},
 };
 
-void test_converter_goldens(void) {
+static void check_goldens(const epi_panel_t* pn, const uint64_t want[4][4]) {
     static const char* names[4] = {"gradient", "hue ramp", "noise", "page"};
     const size_t n = (size_t)GOLDEN_W * GOLDEN_H;
     epi_rgb_t* img = xmalloc(n * sizeof *img);
     uint8_t* out = xmalloc(n);
-    TEST_ASSERT_EQUAL_size_t(4, panel()->preset_count);
+    TEST_ASSERT_EQUAL_size_t(4, pn->preset_count);
     char report[1024];
     size_t len = 0;
     int bad = 0;
@@ -633,13 +658,13 @@ void test_converter_goldens(void) {
         }
         len += (size_t)snprintf(report + len, sizeof report - len, "\n    /* %s */ {", names[i]);
         for (int p = 0; p < 4; p++) {
-            epi_config_t cfg = config(panel(), GOLDEN_W, GOLDEN_H);
-            cfg.intent = panel()->presets[p].intent;
+            epi_config_t cfg = config(pn, GOLDEN_W, GOLDEN_H);
+            cfg.intent = pn->presets[p].intent;
             TEST_ASSERT_EQUAL_INT(GOLDEN_H, run_converter(&cfg, img, out, NULL));
             uint64_t hsh = fnv1a64(out, n);
-            bad |= hsh != goldens[i][p];
+            bad |= hsh != want[i][p];
             /* Through the packer, the same codes reach the panel. */
-            TEST_ASSERT_TRUE(packed_codes_hash(panel(), EPI_PACK_4BPP, 4, out, GOLDEN_W, GOLDEN_H) == hsh);
+            TEST_ASSERT_TRUE(packed_codes_hash(pn, EPI_PACK_4BPP, 4, out, GOLDEN_W, GOLDEN_H) == hsh);
             len += (size_t)snprintf(
                 report + len, sizeof report - len, "UINT64_C(0x%016llx)%s", (unsigned long long)hsh, p < 3 ? ", " : "},"
             );
@@ -651,4 +676,17 @@ void test_converter_goldens(void) {
         printf("golden hashes, got:%s\n", report);
         TEST_FAIL_MESSAGE("converter output changed (see the golden hashes printed above)");
     }
+}
+
+void test_converter_goldens(void) {
+    check_goldens(panel(), goldens);
+}
+
+void test_converter_goldens_without_neutral(void) {
+    epi_colour_tables_t off = *epi_colour_tables(panel()->tables);
+    TEST_ASSERT_EQUAL_UINT8(1, off.has_neutral);
+    off.has_neutral = 0;
+    epi_panel_t p = *panel();
+    p.tables = &off.base;
+    check_goldens(&p, goldens_without_neutral);
 }

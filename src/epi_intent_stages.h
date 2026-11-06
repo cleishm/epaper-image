@@ -8,13 +8,14 @@
 #include "epi_intent.h"
 
 typedef struct {
-    int32_t lsrc;          /* S1: L*src */
-    int32_t d;             /* S1: adaptation degree D */
-    int32_t lab_panel[3];  /* S1: ink-relative CIELAB of the panel colour */
-    int32_t lab_tone[3];   /* S3: after tone + detail */
-    int32_t lab_colour[3]; /* S4: after vibrance and veil */
-    int32_t xyz[3];        /* S5: after the cusp move */
-    uint8_t moved;         /* S5: 1 if the pixel was outside the hull */
+    int32_t lsrc;           /* S1: L*src */
+    int32_t d;              /* S1: adaptation degree D */
+    int32_t lab_panel[3];   /* S1: ink-relative CIELAB of the panel colour */
+    int32_t lab_tone[3];    /* S3: after tone + detail */
+    int32_t lab_colour[3];  /* S4: after vibrance and veil */
+    int32_t lab_neutral[3]; /* after the neutral cast (lab_colour when the panel has none) */
+    int32_t xyz[3];         /* S5: after the cusp move */
+    uint8_t moved;          /* S5: 1 if the pixel was outside the hull */
 } epi_intent_stages_t;
 
 /* One pixel of epi_intent_row, also writing its intermediates. */

@@ -3,7 +3,8 @@
 The measured ink colours are NOT repeated here: they come from the ink
 table named by `table` (palette.py), in its ink index
 order. This file adds what the ink table does not carry: panel codes, native
-size, sigma and the preset list (docs/design.md, "Panel tables").
+size, sigma, the preset list and the neutral-cast JSON (docs/design.md, "Panel
+tables").
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ class Panel:
     detail_sigma: float  # panel px
     presets: tuple[Preset, ...]  # [0] is the default
     doc: str  # one-line comment for the generated file
+    # Repo-relative neutral-cast JSON ({"panel", "source", "knots": [[L*, a*, b*], ...]};
+    # design.md "Neutral cast"), or None for no correction.
+    neutral: str | None = None
 
 
 EL133UF1 = Panel(
@@ -54,6 +58,7 @@ EL133UF1 = Panel(
         Preset("Vivid", tone=0.5, detail=0.75, adapt=0.5, vibrance=1.3, lift=8.0),
     ),
     doc='E Ink EL133UF1, Spectra 6, 13.3" 1200x1600 (reTerminal E1004)',
+    neutral="tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json",
 )
 
 PANELS = {p.ident: p for p in (EL133UF1,)}

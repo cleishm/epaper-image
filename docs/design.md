@@ -40,6 +40,7 @@ label S1 to S7:
 | S2 base | separable Gaussian blur of L\*src | L\*src in a (2r+1)×(2r+1) window | base L\* |
 | S3 tone and detail | tone curve on the base, local detail added back | L\*src, base | new L\* |
 | S4 colour | vibrance on a\*b\*, veil on L\* | CIELAB | CIELAB |
+| neutral cast | the panel's a\*b\* offset for greys, by L\* | CIELAB | CIELAB |
 | S5 gamut | in-gamut test in XYZ; out-of-hull pixels moved onto the hull | CIELAB | XYZ inside the ink hull |
 | S6 target | XYZ to linear sRGB | XYZ | target t |
 | S7 error diffusion | nearest ink, damped serpentine Floyd–Steinberg | t and the diffused error | ink index |
@@ -57,7 +58,7 @@ A panel is either a **colour panel** (for example the EL133UF1, a six-ink
 Spectra 6 glass) or a **grey panel** (2 to 16 grey levels, for example the
 GDEY075T7 in its mono and 4-grey modes). Grey panels run the same pipeline
 with every chromatic stage reduced to lightness: S1 computes only L\*src,
-there is no adaptation, vibrance or hull, the target is a single luminance,
+there is no adaptation, vibrance, neutral cast or hull, the target is a single luminance,
 and S7 works in one channel with a coverage toe ahead of it. The difference
 is carried by the panel's tables (`kind` in `struct epi_panel_tables`); the
 converter branches on it to call the colour or grey row functions at each
@@ -214,11 +215,13 @@ the split. A colour panel's struct also holds:
 - L\*min and L\*max, the neutral interval of the hull (Q8);
 - the cusp L\* at each integer hue degree, 360 entries (Q8);
 - each ink's linear sRGB and ink-relative OKLab (Q16);
-- n̂ = w/|w|, the white ink's direction in linear sRGB (Q16).
+- n̂ = w/|w|, the white ink's direction in linear sRGB (Q16);
+- the neutral-cast offsets, a\* and b\* at each integer L\* 0..100 (Q8), and
+  whether the panel has them (`has_neutral`; see [Neutral cast](#neutral-cast)).
 
 A grey panel's struct holds instead each level's Y relative to the lightest
 (`level_y`, Q16) and the decision thresholds between levels (`level_thr`,
-Q16). On a 64-bit host the colour tables are 2,112 B and the grey tables 260 B.
+Q16). On a 64-bit host the colour tables are 2,520 B and the grey tables 260 B.
 A panel has at most 16 inks and a kernel radius of at most 32.
 
 Both kinds of table can be generated offline by `tools/panelgen` and committed
@@ -452,6 +455,40 @@ the clip, so the clip's contour shows. A `veil` of about 1 hides the contour
 under a light dot field, but the same dots read as spots on intentionally white
 areas such as a page background. Every preset therefore leaves `veil` at 0, and
 it is an option for images with clipped highlights.
+
+### Neutral cast
+
+A colour panel can carry an offset to the a\* and b\* of its greys. Where it has
+one, the S4 colour (L\*, a\*, b\*) becomes
+
+```
+s        = 1 − ss(C*, 12, 32)
+(a*, b*) ← (a*, b*) + s · n(L*)
+```
+
+with C\* that of the S4 colour and L\* unchanged. n is a table of a\*, b\* pairs at
+integer L\* 0..100 (Q8), which init builds from up to 16 knots
+(`epi_neutral_knot_t`): linear in L\* between knots and zero outside the first and
+last. Per pixel L\* is clamped to [0, 100] and n interpolated linearly between
+entries. s is the lift's share of S1, the same function.
+
+On the EL133UF1 the near-neutral greys are mixed from coloured inks, and on the
+glass they come out yellow-green, most strongly around L\* 58. The ink model
+predicts them neutral: the error is in how the sparse minority dots develop, which
+the ink table cannot describe. An offset to the target's a\* and b\*, by lightness,
+makes them look neutral. Its knots come from photos of grey ramps and nulling
+charts, and from blind nulling picks on the panel.
+
+- n is indexed by the final L\*, after tone, lift and veil, because the dot mix on
+  the glass, and with it the cast, follows the target's lightness, not the
+  source's.
+- Saturated colours are left alone: the offsets were found on greys, and a
+  saturated colour is drawn mostly in its own ink. The share fades the offset out
+  between chroma 12 and 32.
+- The EL133UF1's offset is zero from L\* 93.4. Near white a grey is paper with a
+  few dots, and the offset would add sparse blue dots there, which read as grain.
+- It is a property of the panel, not a knob of the intent: it corrects the glass,
+  so every preset and every image gets it.
 
 ### S5: gamut mapping
 
@@ -811,7 +848,7 @@ the Default, Soft and Deep of [Presets](#presets).
 
 `epi_colour_panel_init` builds a colour panel at runtime from measured inks, in
 caller storage of `epi_colour_panel_size` bytes (any alignment; the size includes
-the slack), which is 2,295 B on a 64-bit host. The storage holds the
+the slack), which is 2,703 B on a 64-bit host. The storage holds the
 `epi_panel_t`, its tables and a copy of the inks; the name is kept by pointer.
 The panel's presets are `epi_colour_presets`: the four of [Presets](#presets),
 EL133UF1's values, shared by every runtime colour panel.
@@ -863,6 +900,11 @@ is q(x, n) = sign(x)·⌊|x|·2^n + 0.5⌋ throughout.
   the last point first, as S5 does, and evaluates Y once per L\*.
 - **Kernel.** The Q15 Gaussian of [S2](#s2-base) for the panel's σ, from
   `epi_gaussian_kernel_q15`, shared with grey panels.
+- **Neutral cast.** The config's knots, interpolated linearly at each integer L\*
+  and zero outside the first and last, rounded to Q8 ([Neutral cast](#neutral-cast)).
+  Init checks the knots with the rest of the config's structure, so
+  `epi_colour_panel_size` judges them too: at most 16, L\* strictly ascending in
+  [0, 100], and a\* and b\* in [−30, 30].
 
 The optional progress callback of `epi_colour_panel_config_t` is called after each
 hue of the cusp search and sees no tables, so it can't affect the panel's determinism;
@@ -1144,21 +1186,25 @@ A built-in colour panel's tables come from the library's own derivation
 ([Colour panels from inks](#colour-panels-from-inks)). panelgen compiles
 `tools/panelgen/colour_tables.c` with `src/epi_colour_panel.c` and the sources it
 links, with the library's floating-point flags, and that program runs
-`epi_colour_tables_derive` and `epi_gaussian_kernel_q15` on the panel's inks and σ.
-`gen.py` renders the integers it prints, beside the panel's own presets. Generating
+`epi_colour_tables_derive` and `epi_gaussian_kernel_q15` on the panel's inks and σ,
+and on the knots of its neutral-cast JSON if `panels.py` names one (`neutral`). The
+EL133UF1's is `tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json`,
+`{"panel", "source", "knots": [[L*, a*, b*], ...]}`. `gen.py` renders the integers
+the program prints, beside the panel's own presets. Generating
 a colour panel therefore needs a C compiler, and gives the panel
 `epi_colour_panel_init` builds from the same inks and σ: `test_colour_panel_el133uf1`
 requires every table field to match, on every target the suite runs on.
 
-Inks or a σ the derivation refuses, or presets `epi_intent_init` would refuse, fail
-generation with the reason, and nothing is written.
+Inks, a σ or knots the derivation refuses, or presets `epi_intent_init` would
+refuse, fail generation with the reason, and nothing is written.
 
 ### Inputs SHA-256 and the check mode
 
 Each generated file starts with the command that produced it and an
 **Inputs SHA-256**: the SHA-256 of a canonical JSON (sorted keys, compact)
 of the generator's inputs. For a colour panel that is the panel definition, the
-ink table and a format version.
+ink table, the neutral-cast JSON (parsed, so line endings don't change it) and a
+format version.
 For a grey glass it is the glass definition, the SHA-256 of the levels JSON's
 bytes, the sRGB inputs and the grey rules. A changed hash in a diff therefore says
 that an input changed, not just the output.

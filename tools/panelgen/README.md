@@ -3,8 +3,8 @@
 panelgen generates the C library's constant tables (docs/design.md, "Panel
 tables"). Colour panels come from the library's own derivation:
 `panelgen/gen.py` compiles `colour_tables.c` with `src/epi_colour_panel.c` and the
-sources it links, runs it on the panel's inks and σ, and renders the integers it
-prints as C. `panelgen/grey.py` computes and renders grey calibrations, and
+sources it links, runs it on the panel's inks, σ and neutral-cast knots, and renders
+the integers it prints as C. `panelgen/grey.py` computes and renders grey calibrations, and
 `panelgen/colour.py` holds the sRGB constants behind `src/epi_srgb.c`.
 
 Set up this tool's venv first, from `tools/panelgen` (only pytest; see
@@ -32,12 +32,15 @@ It writes:
   [Grey calibrations](#grey-calibrations).
 
 Panels are defined in `panelgen/panels.py`. A definition holds the codes, the
-size, σ and the presets. The measured inks come from the ink table it
-names (`panelgen/palette.py`).
+size, σ, the presets and optionally a neutral-cast JSON (`neutral`, repo-relative;
+docs/design.md "Neutral cast"). The measured inks come from the ink table it
+names (`panelgen/palette.py`). The neutral-cast JSON is
+`{"panel": <ident>, "source": <how it was measured>, "knots": [[L*, a*, b*], ...]}`;
+the EL133UF1's is `measurements/el133uf1-neutral-2026-11-05.json`.
 
 Each generated file starts with the command above and a SHA-256 of the
 generator's inputs. For a colour panel those are the panel definition, the ink
-table and a format version. The output is deterministic, so to test
+table, the neutral-cast JSON (parsed) and a format version. The output is deterministic, so to test
 reproducibility you regenerate and diff (`--check`), which also catches a change
 in the library's derivation. The pytest suite also regenerates the files twice
 into temporary trees and compares them byte for byte.
@@ -49,8 +52,10 @@ and it has different path separators.
 
 Generation stops with the panel and the reason, and exits with status 2, if:
 
-- `epi_colour_panel_init` refuses the inks, their nominal colours, the ink count or
-  σ (docs/design.md, "Colour panels from inks").
+- `epi_colour_panel_init` refuses the inks, their nominal colours, the ink count,
+  σ or the neutral-cast knots (docs/design.md, "Colour panels from inks").
+- The neutral-cast JSON can't be read, is for another panel, or its knots are not
+  triples of numbers.
 - A preset fails a check `epi_intent_init` makes of it (`gen.check_presets`), or
   there are no presets.
 - No C compiler is found, or the compiler can't be run or fails to compile

@@ -367,6 +367,70 @@ void test_intent_lift(void) {
     }
 }
 
+/* The panel's offset at L* (Q8), interpolated as the intent does, rounding half away from zero. */
+static void neutral_offset(const epi_colour_tables_t* t, int32_t l, int32_t out[2]) {
+    l = l < 0 ? 0 : (l > 100 * 256 ? 100 * 256 : l);
+    const int32_t i = l >> 8, fr = l & 255;
+    for (int c = 0; c < 2; c++) {
+        out[c] = t->neutral_q8[i][c];
+        if (i < 100) {
+            const int32_t d = (t->neutral_q8[i + 1][c] - t->neutral_q8[i][c]) * fr;
+            out[c] += d >= 0 ? (d + 128) >> 8 : -((-d + 128) >> 8);
+        }
+    }
+}
+
+/* Neutral cast: a grey takes the panel's offset at its final L* in full; a saturated colour takes none; L* and S4's
+ * own output are unchanged. */
+void test_intent_neutral_cast(void) {
+    const epi_colour_tables_t* t = colour_tables();
+    TEST_ASSERT_EQUAL_UINT8(1, t->has_neutral);
+    epi_colour_tables_t off = *t;
+    off.has_neutral = 0;
+    epi_intent_ctx_t ctx_off;
+    TEST_ASSERT_EQUAL(EPI_OK, epi_intent_init(&ctx_off, &off.base, preset(0)));
+
+    int32_t most_b = 0;
+    for (int v = 0; v < 256; v += 5) {
+        const epi_rgb_t grey = {(uint8_t)v, (uint8_t)v, (uint8_t)v};
+        pixel_t p = run_pixel(preset(0), grey);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(p.st.lab_tone, p.st.lab_colour, 3);
+        TEST_ASSERT_TRUE(epi_hypot_q(p.st.lab_colour[1], p.st.lab_colour[2]) <= 12 * 256); /* full share */
+        int32_t n[2];
+        neutral_offset(t, p.st.lab_colour[0], n);
+        TEST_ASSERT_EQUAL_INT32(p.st.lab_colour[0], p.st.lab_neutral[0]);
+        TEST_ASSERT_EQUAL_INT32(p.st.lab_colour[1] + n[0], p.st.lab_neutral[1]);
+        TEST_ASSERT_EQUAL_INT32(p.st.lab_colour[2] + n[1], p.st.lab_neutral[2]);
+        most_b = n[1] < most_b ? n[1] : most_b;
+
+        /* S5 maps the shifted colour: without the table the target differs wherever the offset isn't zero. */
+        int16_t ls;
+        int32_t target_off[3];
+        epi_intent_stages_t st_off;
+        epi_intent_lstar_row(&grey, &ls, 1);
+        epi_intent_pixel_stages(&ctx_off, &grey, ls, target_off, &st_off);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(p.st.lab_colour, st_off.lab_colour, 3);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(st_off.lab_colour, st_off.lab_neutral, 3);
+        if (n[0] == 0 && n[1] == 0) {
+            TEST_ASSERT_EQUAL_INT32_ARRAY(target_off, p.target, 3);
+        } else {
+            TEST_ASSERT_FALSE(
+                target_off[0] == p.target[0] && target_off[1] == p.target[1] && target_off[2] == p.target[2]
+            );
+        }
+    }
+    TEST_ASSERT_TRUE(most_b < -10 * 256); /* the sweep crosses the strongest correction */
+
+    const epi_rgb_t saturated[] = {{170, 30, 30}, {30, 60, 170}, {40, 140, 60}, {230, 200, 40}};
+    for (size_t i = 0; i < sizeof saturated / sizeof saturated[0]; i++) {
+        for (size_t k = 0; k < epi_panel_el133uf1.preset_count; k++) {
+            pixel_t p = run_pixel(preset(k), saturated[i]);
+            TEST_ASSERT_TRUE(epi_hypot_q(p.st.lab_colour[1], p.st.lab_colour[2]) >= 32 * 256);
+            TEST_ASSERT_EQUAL_INT32_ARRAY(p.st.lab_colour, p.st.lab_neutral, 3);
+        }
+    }
+}
+
 /* Vibrance at its maximum drives a* b* far out (through the linear branch
  * of f⁻¹); every result still ends inside the hull. */
 void test_intent_extreme_vibrance(void) {
