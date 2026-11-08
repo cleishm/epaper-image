@@ -65,11 +65,33 @@ def srgb_inputs() -> dict:
     }
 
 
+def neutral_json(panel: Panel) -> dict | None:
+    """The panel's neutral-cast JSON, parsed, or None: its knots are [L*, a*, b*] numbers."""
+    if panel.neutral is None:
+        return None
+    path = REPO / panel.neutral
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, json.JSONDecodeError) as e:
+        raise PanelError(f"{panel.name}: neutral JSON {panel.neutral}: {e}") from None
+    if not isinstance(data, dict) or data.get("panel") != panel.ident:
+        raise PanelError(f"{panel.name}: neutral JSON {panel.neutral} is not for panel {panel.ident}")
+    knots = data.get("knots")
+    if not isinstance(knots, list) or not all(
+            isinstance(k, list) and len(k) == 3 and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                                        for v in k) for k in knots):
+        raise PanelError(f"{panel.name}: neutral JSON {panel.neutral}: knots must be [L*, a*, b*] numbers")
+    return data
+
+
 def panel_inputs(panel: Panel) -> dict:
+    """The panel definition, its ink table, its neutral-cast JSON (parsed, so line endings don't count) and the
+    format version."""
     entries = BUILTIN_TABLES[panel.palette][panel.table]
     return {
         "panel": asdict(panel),
         "inks": {k: [list(v[0]), list(v[1])] for k, v in entries.items()},
+        "neutral": neutral_json(panel),
         "format_version": FORMAT_VERSION,
     }
 
@@ -114,8 +136,11 @@ def derive(panel: Panel) -> Derived:
     check_presets(panel)
     # Each ink as measured R G B then nominal R G B; entries hold (nominal, measured).
     inks = [str(v) for nominal, measured in entries.values() for v in (*measured, *nominal)]
-    r = subprocess.run([_colour_tables_program(), repr(panel.detail_sigma), *inks], capture_output=True, text=True)
-    if r.returncode == 1:  # the inks or sigma; anything else is a bug
+    neutral = neutral_json(panel)
+    knots = neutral["knots"] if neutral else []
+    args = [repr(panel.detail_sigma), str(len(knots)), *(repr(float(v)) for k in knots for v in k), *inks]
+    r = subprocess.run([_colour_tables_program(), *args], capture_output=True, text=True)
+    if r.returncode == 1:  # the inks, sigma or knots; anything else is a bug
         raise PanelError(f"{panel.name}: {r.stderr.strip()}")
     r.check_returncode()
     return Derived(panel=panel, ints=json.loads(r.stdout))
@@ -220,6 +245,7 @@ def render_panel(t: Derived) -> tuple[str, str]:
     head = _header(sha, [
         f"Panel calibration {p.name}: {p.doc}.",
         f"Inks: ink table {p.palette}/{p.table} (tools/panelgen/panelgen/palette.py).",
+        *([f"Neutral cast: {p.neutral}."] if p.neutral else []),
         "Tables: epi_colour_tables_derive (src/epi_colour_panel.c) and",
         "epi_gaussian_kernel_q15; see src/epi_panel_tables.h for every field's Q format.",
         "The kernel holds tap -r at index 0 through tap +r at index 2r; entries beyond are 0.",
@@ -263,6 +289,9 @@ def render_panel(t: Derived) -> tuple[str, str]:
     out.append(_mat("ink_lin", I["ink_lin"]))
     out.append(_mat("ink_oklab", I["ink_oklab"]))
     out.append(f"    .nhat = {_row(I['nhat'])},")
+    if I["has_neutral"]:
+        out.append(f"    .has_neutral = {I['has_neutral']},")
+        out.append("    .neutral_q8 =\n        {\n" + _block(I["neutral_q8"], 8, "            ", _row) + "\n        },")
     out += ["};", ""]
 
     out.append(f"const epi_panel_t epi_panel_{pid} = {{")

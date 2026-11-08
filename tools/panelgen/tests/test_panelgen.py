@@ -1,6 +1,7 @@
 """panelgen: the rendered tables, bad inks and byte-identical regeneration. What the
 tables hold is the library's: tests/test_colour_panel.c holds them to the runtime panel."""
 
+import json
 import math
 import re
 import shutil
@@ -12,7 +13,8 @@ import pytest
 
 from panelgen import PANELGEN_DIR, REPO, PanelError
 from panelgen.__main__ import main
-from panelgen.gen import _colour_tables_program, check_presets, derive, kernel_q15, outputs, q, render_srgb
+from panelgen.gen import (_colour_tables_program, check_presets, derive, kernel_q15, outputs, panel_inputs, q,
+                          render_panel, render_srgb)
 from panelgen.palette import BUILTIN_TABLES
 from panelgen.panels import EL133UF1, PANELS, Panel, Preset
 
@@ -146,8 +148,45 @@ def test_rendered_values_match_derived(t):
     text = outputs([EL133UF1])["src/panels/el133uf1.c"][0]
     for f in ("kernel", "hull_d", "cusp_lstar"):
         assert _ints_after(text, f) == t.ints[f], f
-    for f in ("lin_to_panel_adapt", "ink_oklab", "hull_n"):
+    for f in ("lin_to_panel_adapt", "ink_oklab", "hull_n", "neutral_q8"):
         assert _ints_after(text, f) == [v for row in t.ints[f] for v in row], f
+    assert ".has_neutral = 1," in text
+
+
+def _with_neutral(tmp_path, data):
+    path = tmp_path / "neutral.json"
+    path.write_text(json.dumps(data))
+    return replace(EL133UF1, neutral=str(path))
+
+
+def test_neutral_json_is_an_input(tmp_path, t):
+    data = json.loads((REPO / EL133UF1.neutral).read_text())
+    assert panel_inputs(_with_neutral(tmp_path, data))["neutral"] == data
+    data["knots"][5][2] -= 1.0  # b* at L* 57.7
+    edited = derive(_with_neutral(tmp_path, data))
+    assert render_panel(edited)[0] != render_panel(t)[0]
+    # The knot's two segments, L* 52..61, move; nothing else does.
+    old, new = t.ints["neutral_q8"], edited.ints["neutral_q8"]
+    assert [i for i in range(101) if new[i] != old[i]] == list(range(52, 61))
+    assert all(new[i][1] < old[i][1] and new[i][0] == old[i][0] for i in range(52, 61))
+
+
+def test_no_neutral_json_no_table():
+    d = derive(replace(EL133UF1, neutral=None))
+    assert d.ints["has_neutral"] == 0 and all(v == [0, 0] for v in d.ints["neutral_q8"])
+    assert "neutral" not in render_panel(d)[1].split("*/", 1)[1]
+
+
+@pytest.mark.parametrize("data, message", [
+    ({"panel": "el133uf1", "knots": [[50, 0, 0], [50, 1, 1]]}, r"neutral knot L\* not strictly ascending"),
+    ({"panel": "el133uf1", "knots": [[50, 31, 0]]}, r"neutral knot a\* or b\* outside"),
+    ({"panel": "el133uf1", "knots": [[50, 0, 0]] * 17}, "more than 16 neutral knots"),
+    ({"panel": "other", "knots": []}, "is not for panel el133uf1"),
+    ({"panel": "el133uf1", "knots": [[50, 0]]}, r"knots must be \[L\*, a\*, b\*\] numbers"),
+])
+def test_bad_neutral_fails_generation(tmp_path, data, message):
+    with pytest.raises(PanelError, match=message):
+        derive(_with_neutral(tmp_path, data))
 
 
 def test_committed_files_up_to_date():

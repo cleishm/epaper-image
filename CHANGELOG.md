@@ -3,6 +3,37 @@
 All notable changes to **epaper-image** are documented in this file. The project
 follows [semantic versioning](https://semver.org/).
 
+## v0.3.0
+
+Lightens the colour presets' lower midtones, corrects the EL133UF1's green cast
+on near-neutral greys, and replaces the Vivid preset with Bright. Intents and
+colour panel configs gain fields, which breaks the API.
+
+**Panel output:** EL133UF1 frames change for every preset: lower midtones are
+lighter, and greys built from coloured inks no longer look green. Grey and mono
+output is unchanged.
+
+### Breaking changes
+
+- `epi_intent_t` gains `lift`: L* added to lower midtones, fading out by L* 82
+  and sparing saturated colours, 0 to 20. An intent initialised without it gets
+  0, the old rendering.
+- `epi_colour_panel_config_t` gains `neutral` and `neutral_count`, an optional
+  neutral-cast correction. A zero-initialised config has none. Init rejects a
+  `NULL` `neutral` with a non-zero count, or the reverse.
+- The EL133UF1 and runtime colour panels offer Default, Soft, Deep and Bright.
+  Vivid is gone; for its chroma boost, set `vibrance` to 1.3 on any intent.
+
+### Added
+
+- Colour presets lift by 8, because paper white is far darker than a screen's
+  and unlifted lower midtones read dark. Bright (tone 0.5, lift 16) is for
+  low-key images that still read dark at 8. Grey presets keep lift 0.
+- `epi_neutral_knot_t`: a* and b* offsets keyed on final L*, interpolated
+  between up to 16 knots and faded out between chroma 12 and 32. The built-in
+  EL133UF1 carries knots measured on the glass.
+- `convert` gains `--lift`, and `--compare` keys record it.
+
 ## v0.2.0
 
 Adds linear-light previews of any size, and colour panels built at runtime from

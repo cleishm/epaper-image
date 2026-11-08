@@ -17,7 +17,7 @@
  * Grey panels (design.md "Grey panels") share S1 (lstar_src), S2 and S3 (tone_detail, with
  * the tone table built by the same code from T0 with W_y = 1 and
  * B_y = level_y[0]), the veil, and the CIELAB f⁻¹ of S5; there is no
- * adaptation, vibrance or hull.
+ * adaptation, vibrance, neutral cast or hull.
  */
 #include "epi_intent.h"
 
@@ -180,9 +180,10 @@ static inline int32_t veil_lstar(const epi_intent_ctx_t* ctx, int32_t l_q8) {
     return l_q8;
 }
 
-/* Lift, S1: the share of the lift a colour takes, 1 for low chroma down to 0 for saturated. The rounded hypot is at
- * most k exactly when a² + b² ≤ k·(k + 1) (epi_isqrt64_round), so most colours skip the root. */
-static inline int32_t lift_share(const int32_t lab[3]) {
+/* 1 − ss(C*, 12, 32), Q16: the share a colour takes of the lift (S1) and of the neutral-cast correction, 1 for low
+ * chroma down to 0 for saturated. The rounded hypot is at most k exactly when a² + b² ≤ k·(k + 1)
+ * (epi_isqrt64_round), so most colours skip the root. */
+static inline int32_t low_chroma_share(const int32_t lab[3]) {
     const uint64_t lo = 12 * 256, hi = 32 * 256;
     uint64_t ua = epi_abs32(lab[1]);
     uint64_t ub = epi_abs32(lab[2]);
@@ -216,6 +217,25 @@ static inline int lift_colour(const epi_intent_ctx_t* ctx, int32_t lsrc_q8, int3
         lin[i] = clamp_i32(epi_mul_q16(lin[i], k), 0, EPI_Q16_ONE);
     }
     return 1;
+}
+
+/* ---- neutral cast ------------------------------------------------------- */
+
+/* (a, b) += share·n(L*), n the panel's offsets at integer L* (Q8) interpolated linearly; L* is unchanged. */
+static inline void neutral_cast(const epi_colour_tables_t* t, int32_t share, int32_t lab[3]) {
+    int32_t l = clamp_i32(lab[0], 0, 100 * 256);
+    int32_t i = l >> 8;
+    int32_t fr = l & 255;
+    if (i >= EPI_NEUTRAL_LEN - 1) {
+        i = EPI_NEUTRAL_LEN - 2;
+        fr = 256;
+    }
+    const int16_t* n0 = t->neutral_q8[i];
+    const int16_t* n1 = t->neutral_q8[i + 1];
+    int32_t da = n0[0] + (int32_t)epi_round_shift((int64_t)(n1[0] - n0[0]) * fr, 8);
+    int32_t db = n0[1] + (int32_t)epi_round_shift((int64_t)(n1[1] - n0[1]) * fr, 8);
+    lab[1] += epi_mul_q16(share, da);
+    lab[2] += epi_mul_q16(share, db);
 }
 
 /* ---- S5 ----------------------------------------------------------------- */
@@ -561,7 +581,7 @@ static inline void intent_pixel(
     panel_lab(ctx, lin, d, lab);
     int32_t share = EPI_Q16_ONE;
     if (ctx->lift_q8 > 0) {
-        share = lift_share(lab);
+        share = low_chroma_share(lab);
         if (lift_colour(ctx, lsrc, share, lin)) {
             panel_lab(ctx, lin, d, lab);
         }
@@ -589,6 +609,17 @@ static inline void intent_pixel(
     lab[0] = veil_lstar(ctx, lab[0]);
     if (st != NULL) {
         copy3(st->lab_colour, lab);
+    }
+
+    /* Neutral cast */
+    if (t->has_neutral) {
+        int32_t w = low_chroma_share(lab);
+        if (w != 0) {
+            neutral_cast(t, w, lab);
+        }
+    }
+    if (st != NULL) {
+        copy3(st->lab_neutral, lab);
     }
 
     /* S5 */

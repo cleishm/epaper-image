@@ -87,7 +87,7 @@ typedef struct {
     float detail;
     /** 0..1: adaptation to paper white below the highlights. */
     float adapt;
-    /** Chroma boost sparing skin and near-neutrals: 1 = off, 1.3 = Vivid; 0..3. */
+    /** Chroma boost sparing skin and near-neutrals: 1 = off; 0..3. */
     float vibrance;
     /** L* below paper white for source white: 0 = off; 0..3. */
     float veil;
@@ -230,6 +230,21 @@ epi_err_t epi_grey_panel_init(
 typedef bool (*epi_progress_fn_t)(void* ctx, unsigned done, unsigned total);
 
 /**
+ * @brief A knot of a colour panel's neutral-cast correction.
+ *
+ * The offset added to the target's ink-relative CIELAB a* and b* at final L*
+ * @c lstar, so that greys built from coloured inks look neutral on the glass.
+ * Between knots the offset is interpolated linearly in L*; below the first knot
+ * and above the last it is zero. Saturated colours take none of it: the offset
+ * fades out between chroma 12 and 32.
+ */
+typedef struct {
+    float lstar; /**< Final L*, in [0, 100], strictly ascending across the knots. */
+    float a;     /**< a* offset, in [−30, 30]. */
+    float b;     /**< b* offset, in [−30, 30]. */
+} epi_neutral_knot_t;
+
+/**
  * @brief A colour panel described by its measured inks (see
  *        epi_colour_panel_init()).
  */
@@ -253,13 +268,21 @@ typedef struct {
     epi_progress_fn_t progress;
     /** Passed to @c progress. */
     void* progress_ctx;
+    /**
+     * Optional neutral-cast correction (see #epi_neutral_knot_t): @c neutral_count
+     * knots, or NULL and 0 for none. The panel keeps only a table derived from
+     * them, so this array may be freed after epi_colour_panel_init().
+     */
+    const epi_neutral_knot_t* neutral;
+    /** 0..16. */
+    size_t neutral_count;
 } epi_colour_panel_config_t;
 
 /**
  * @brief Storage bytes epi_colour_panel_init() needs for @p cfg, or 0 if the
  *        structure of @p cfg is invalid.
  *
- * Checks the pointers, sizes, ink count and sigma. The inks are validated by
+ * Checks the pointers, sizes, ink count, sigma and neutral knots. The inks are validated by
  * epi_colour_panel_init(), because that check is its slow part, so a non-zero
  * size does not mean the inks are accepted. Includes alignment slack, so any
  * storage pointer may be passed.
@@ -271,7 +294,8 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *
  * The storage holds the #epi_panel_t, its derived tables (the ink hull, the
  * adaptation and OKLab matrices, the cusp table, the inks in linear sRGB and
- * OKLab, and the Q15 Gaussian detail kernel) and a copy of the inks; it must
+ * OKLab, the neutral-cast table and the Q15 Gaussian detail kernel) and a copy
+ * of the inks; it must
  * outlive the panel and every converter using it, and needs no particular
  * alignment or contents. Its contents are unspecified after an error.
  * @c cfg->inks may point into the storage, to re-init from a panel's own inks.
@@ -287,8 +311,8 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  * top of it.
  *
  * The panel offers four presets: Default (tone 0.5), Soft (tone 0), Deep (tone 1)
- * and Vivid (tone 0.5, vibrance 1.3), each with detail 0.75, adapt 0.5, vibrance 1
- * unless stated, veil 0 and lift 8.
+ * and Bright (tone 0.5, lift 16), each with detail 0.75, adapt 0.5, vibrance 1,
+ * veil 0 and lift 8 unless stated.
  *
  * @param cfg     The panel to build.
  * @param storage Storage for the panel.
@@ -302,7 +326,10 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  *
  * @return EPI_OK; EPI_ERR_INVALID_ARG for a NULL pointer (@c cfg is judged
  *         first, then @p storage and @p out), a zero size, an ink count outside
- *         5..16, sigma outside (0, 10.5], or inks that can't make a panel: inks
+ *         5..16, sigma outside (0, 10.5], more than 16 neutral knots, a NULL
+ *         @c neutral with a non-zero count or the reverse, a knot outside the
+ *         ranges of #epi_neutral_knot_t (NaN included) or knots whose L* do not
+ *         strictly ascend, or inks that can't make a panel: inks
  *         not spanning three dimensions; a white ink (the largest measured Y)
  *         whose nominal Y is below another ink's; a black ink (the smallest
  *         measured Y) whose nominal Y is above another ink's; a white ink with
