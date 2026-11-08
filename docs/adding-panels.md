@@ -218,7 +218,7 @@ const epi_panel_t* make_panel(void) {
 
 Use the result like a built-in panel, in `epi_config_t.panel`. Its storage must
 outlive the panel and every converter using it. It includes Default, Soft, Deep and
-Vivid presets.
+Bright presets.
 
 Init runs about 400,000 in-gamut tests in double, each asking whether a colour
 lies inside the convex hull of the inks. On a chip without a double-precision FPU,

@@ -580,7 +580,7 @@ void test_converter_drain_violation(void) {
  * (streaming == whole image, and the end-to-end checks). Update only on an
  * intentional change to the output: run the test, and copy the "got" values
  * it prints on failure into this table (one row per input, presets in the
- * panel's order: Default, Soft, Deep, Vivid).
+ * panel's order: Default, Soft, Deep, Bright).
  */
 #define GOLDEN_W 157
 #define GOLDEN_H 119
@@ -589,22 +589,22 @@ static const uint64_t goldens[4][4] = {
     {UINT64_C(0x71d853f5df39050a),
      UINT64_C(0xdfd49792591acb72),
      UINT64_C(0x6f0b5975a7c50dd7),
-     UINT64_C(0x7ced738c2c2ffdb1)},
+     UINT64_C(0x1877667ced146fb5)},
     /* hue ramp */
     {UINT64_C(0x06036531f947a83a),
      UINT64_C(0x778fd2d326629ae3),
      UINT64_C(0x30273a18d52401f4),
-     UINT64_C(0xc8caaa06fabd37ce)},
+     UINT64_C(0x9548ebb0d89f95c0)},
     /* noise */
     {UINT64_C(0xa1b6a0f6c97a6e37),
      UINT64_C(0xf6e27789aee81202),
      UINT64_C(0x81882e852209af42),
-     UINT64_C(0x139e89b3ac264a39)},
-    /* page (neutral, so Vivid = Default) */
+     UINT64_C(0xa695a159ce4735d4)},
+    /* page */
     {UINT64_C(0x6b8fb336aaf4a1b4),
      UINT64_C(0x70d8c82189cba1b5),
      UINT64_C(0x3ea79ade10084607),
-     UINT64_C(0x6b8fb336aaf4a1b4)},
+     UINT64_C(0xb9a413f25de60252)},
 };
 
 /* The same with the panel's neutral cast cleared (has_neutral 0): the output of a
@@ -614,22 +614,22 @@ static const uint64_t goldens_without_neutral[4][4] = {
     {UINT64_C(0x1e1ee32fa0c19a3b),
      UINT64_C(0x7e3e724b8020f34e),
      UINT64_C(0x00f153a7ac7c1952),
-     UINT64_C(0xd173cdf52bd6a2d8)},
+     UINT64_C(0xad870aa636897740)},
     /* hue ramp */
     {UINT64_C(0xeb0ce46a46d233c0),
      UINT64_C(0xabef27f76593e7df),
      UINT64_C(0xbd9cfc7c45f422e5),
-     UINT64_C(0x70219770a57456e1)},
+     UINT64_C(0x74e548fa8e282898)},
     /* noise */
     {UINT64_C(0x3933c1b51b2ae1ad),
      UINT64_C(0x3f081fc88f92034f),
      UINT64_C(0xf88449c5d3f511ab),
-     UINT64_C(0x202c6f391544084d)},
+     UINT64_C(0xa0960e7f0e6d851d)},
     /* page */
     {UINT64_C(0xcae2b79a1fd803c9),
      UINT64_C(0xb1dba564c2b19f18),
      UINT64_C(0xf923f6b29d1bc6a8),
-     UINT64_C(0xcae2b79a1fd803c9)},
+     UINT64_C(0xe844a424666ef1ca)},
 };
 
 static void check_goldens(const epi_panel_t* pn, const uint64_t want[4][4]) {

@@ -18,18 +18,18 @@
 #include <stdint.h>
 #include <string.h>
 
-#define COLOUR_INTENT(t, v) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = (v), .veil = 0.0f, .lift = 8.0f}
+#define COLOUR_INTENT(t, l) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = 1.0f, .veil = 0.0f, .lift = (l)}
 
-static const epi_intent_t colour_intent_default = COLOUR_INTENT(0.5f, 1.0f);
-static const epi_intent_t colour_intent_soft = COLOUR_INTENT(0.0f, 1.0f);
-static const epi_intent_t colour_intent_deep = COLOUR_INTENT(1.0f, 1.0f);
-static const epi_intent_t colour_intent_vivid = COLOUR_INTENT(0.5f, 1.3f);
+static const epi_intent_t colour_intent_default = COLOUR_INTENT(0.5f, 8.0f);
+static const epi_intent_t colour_intent_soft = COLOUR_INTENT(0.0f, 8.0f);
+static const epi_intent_t colour_intent_deep = COLOUR_INTENT(1.0f, 8.0f);
+static const epi_intent_t colour_intent_bright = COLOUR_INTENT(0.5f, 16.0f);
 
 const epi_preset_t epi_colour_presets[EPI_COLOUR_PRESET_COUNT] = {
     {"Default", &colour_intent_default},
     {"Soft", &colour_intent_soft},
     {"Deep", &colour_intent_deep},
-    {"Vivid", &colour_intent_vivid},
+    {"Bright", &colour_intent_bright},
 };
 
 /* What the caller's storage holds (placed at its first aligned address). */

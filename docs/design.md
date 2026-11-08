@@ -569,7 +569,7 @@ the converter is given no intent. The EL133UF1 offers:
 | Default | 0.5 | 0.75 | 0.5 | 1 | 0 | 8 |
 | Soft | 0 | 0.75 | 0.5 | 1 | 0 | 8 |
 | Deep | 1 | 0.75 | 0.5 | 1 | 0 | 8 |
-| Vivid | 0.5 | 0.75 | 0.5 | 1.3 | 0 | 8 |
+| Bright | 0.5 | 0.75 | 0.5 | 1 | 0 | 16 |
 
 Soft keeps the image's tonal proportions (pure black-point compensation),
 which lifts shadows; Deep keeps midtones at their source lightness and
@@ -581,6 +581,9 @@ Paper white is far darker than an LCD's, so unlifted lower midtones read dark
 beside the original; every colour preset lifts, or the presets without it would
 look darker than a lifted Default. Lift 8 is the strength: 4 leaves dark images
 dull, and 12 over-lifts dark skin, washes out fur and loses detail at night.
+Bright doubles it for low-key images that still read dark at 8; it is not the
+default because at 16 night scenes lose detail and turn grainy, and above 16
+light images wash out.
 
 Tone has the largest effect of any knob. Tone 1 loses detail in dark images, and
 `detail` cannot recover it, because the blur restores texture finer than σ, not

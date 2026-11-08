@@ -87,7 +87,7 @@ typedef struct {
     float detail;
     /** 0..1: adaptation to paper white below the highlights. */
     float adapt;
-    /** Chroma boost sparing skin and near-neutrals: 1 = off, 1.3 = Vivid; 0..3. */
+    /** Chroma boost sparing skin and near-neutrals: 1 = off; 0..3. */
     float vibrance;
     /** L* below paper white for source white: 0 = off; 0..3. */
     float veil;
@@ -311,8 +311,8 @@ size_t epi_colour_panel_size(const epi_colour_panel_config_t* cfg);
  * top of it.
  *
  * The panel offers four presets: Default (tone 0.5), Soft (tone 0), Deep (tone 1)
- * and Vivid (tone 0.5, vibrance 1.3), each with detail 0.75, adapt 0.5, vibrance 1
- * unless stated, veil 0 and lift 8.
+ * and Bright (tone 0.5, lift 16), each with detail 0.75, adapt 0.5, vibrance 1,
+ * veil 0 and lift 8 unless stated.
  *
  * @param cfg     The panel to build.
  * @param storage Storage for the panel.

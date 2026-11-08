@@ -176,8 +176,8 @@ void test_intent_saturated_ends_inside(void) {
     }
     /* Vibrance only changes chroma, so a neutral is unaffected and a
      * saturated colour gains chroma before the move. */
-    epi_intent_t viv = *preset(3);
-    TEST_ASSERT_TRUE(viv.vibrance != 1.0f);
+    epi_intent_t viv = *preset(0);
+    viv.vibrance = 1.3f;
     pixel_t n = run_pixel(&viv, (epi_rgb_t){119, 119, 119});
     TEST_ASSERT_EQUAL_INT32_ARRAY(n.st.lab_tone, n.st.lab_colour, 3);
     pixel_t s = run_pixel(&viv, (epi_rgb_t){60, 90, 160});

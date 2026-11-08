@@ -55,7 +55,7 @@ EL133UF1 = Panel(
         Preset("Default", tone=0.5, detail=0.75, adapt=0.5, lift=8.0),
         Preset("Soft", tone=0.0, detail=0.75, adapt=0.5, lift=8.0),
         Preset("Deep", tone=1.0, detail=0.75, adapt=0.5, lift=8.0),
-        Preset("Vivid", tone=0.5, detail=0.75, adapt=0.5, vibrance=1.3, lift=8.0),
+        Preset("Bright", tone=0.5, detail=0.75, adapt=0.5, lift=16.0),
     ),
     doc='E Ink EL133UF1, Spectra 6, 13.3" 1200x1600 (reTerminal E1004)',
     neutral="tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json",
