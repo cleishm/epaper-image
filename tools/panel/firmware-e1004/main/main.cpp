@@ -5,7 +5,6 @@
 // epi_protocol) is specified in ../../README.md; the host side is
 // ../../send.py.
 
-#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -16,11 +15,11 @@
 #include <freertos/task.h>
 #include <idfxx/epaper/color6_framebuffer>
 #include <idfxx/epaper/el133uf1>
+#include <idfxx/epaper/ink_writer>
 #include <idfxx/gpio>
 #include <idfxx/spi/master>
 #include <optional>
 #include <soc/uart_pins.h>
-#include <span>
 
 namespace {
 
@@ -47,28 +46,6 @@ constexpr uint16_t HEIGHT = 1600;
 constexpr uint32_t FRAME_BYTES = (WIDTH + 1) / 2 * HEIGHT; // 960000
 
 using epi::send_line;
-
-// Byte b is valid iff both nibbles are panel codes 0,1,2,3,5,6
-// (black, white, yellow, red, blue, green). 4 and 7..15 are rejected.
-constexpr std::array<bool, 256> make_valid_bytes() {
-    std::array<bool, 256> t{};
-    auto ok = [](unsigned v) { return v <= 6 && v != 4; };
-    for (unsigned b = 0; b < 256; ++b) {
-        t[b] = ok(b >> 4) && ok(b & 0xF);
-    }
-    return t;
-}
-constexpr auto VALID_BYTE = make_valid_bytes();
-
-// Returns the offset of the first byte with an invalid nibble, or -1.
-long first_invalid_byte(const uint8_t* p, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        if (!VALID_BYTE[p[i]]) {
-            return long(i);
-        }
-    }
-    return -1;
-}
 
 struct panel_hw {
     idfxx::gpio power = PIN_POWER;
@@ -135,17 +112,17 @@ bool handle_frame(const epi::header& h) {
         return false;
     }
 
-    // Payload received straight into the framebuffer.
-    const std::span<uint8_t> dst[]{g_fb->data()};
-    if (!epi::receive_payload(dst, h)) {
+    // Payload received into the framebuffer a band at a time; write_inks
+    // rejects a band holding a nibble that is not an ink code. After that
+    // the rest of the payload is still received, so a corrupted transfer
+    // reports its CRC mismatch rather than the nibbles it garbled.
+    epi::payload_source payload(h);
+    const auto written = idfxx::epaper::try_write_inks(*g_fb, payload);
+    if (!payload.finish()) {
         return false;
     }
-    const uint8_t* data = g_fb->data().data();
-    if (long bad = first_invalid_byte(data, h.length); bad >= 0) {
-        const unsigned b = data[bad];
-        const unsigned x = unsigned(bad % ((WIDTH + 1) / 2)) * 2;
-        const unsigned y = unsigned(bad / ((WIDTH + 1) / 2));
-        send_line("err invalid ink code at byte %ld (x=%u..%u, y=%u): 0x%02x", bad, x, x + 1, y, b);
+    if (!written) {
+        send_line("err inks: %s", written.error().message().c_str());
         return false;
     }
 

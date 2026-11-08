@@ -11,7 +11,8 @@
 // epi::serve() a per-panel frame handler. serve() scans the input for a
 // 4-byte magic, answers pings, reads the 12 header bytes that follow a
 // frame magic "EPI<digit>" and calls the handler; the handler validates the
-// header, receives the payload with epi::receive_payload() and shows it.
+// header, reads the payload from an epi::payload_source (with idfxx's
+// write_inks), finishes it and shows the frame.
 
 #pragma once
 
@@ -19,6 +20,8 @@
 #include <cstdint>
 #include <driver/uart.h>
 #include <freertos/FreeRTOS.h>
+#include <idfxx/byte_source>
+#include <idfxx/error>
 #include <span>
 
 namespace epi {
@@ -95,13 +98,35 @@ bool read_exact(uint8_t* dst, size_t n, TickType_t timeout);
 // of an aborted transfer is not mistaken for a new header.
 void drain_input();
 
-// Receives a payload of h.length bytes in CHUNK-byte chunks (the last one is
-// the remainder) straight into dst (consecutive segments, total size >=
-// h.length), replying "@epi ok 0" first and "@epi ok <offset of next byte>"
-// after each chunk, nothing else meanwhile. Then checks the CRC32 and
-// replies "@epi crc ok". Returns false after replying "@epi err ..." on a
-// chunk timeout or CRC mismatch.
-bool receive_payload(std::span<const std::span<uint8_t>> dst, const header& h);
+// A frame's payload of h.length bytes, received as an idfxx::byte_source in
+// CHUNK-byte chunks (the last one is the remainder). Construction replies
+// "@epi ok 0"; each chunk completed replies "@epi ok <offset of next byte>",
+// and nothing else is sent meanwhile. Reads go straight into the caller's
+// buffer, never past the end of a chunk, and keep a running CRC32. A chunk
+// that does not complete within CHUNK_TIMEOUT replies "@epi err timeout at
+// offset <chunk start>" and fails the read (errc::timeout), as does every
+// read after it. Once all h.length bytes have been read, reads return 0.
+class payload_source {
+public:
+    explicit payload_source(const header& h);
+    idfxx::result<size_t> try_read(std::span<uint8_t> buf);
+
+    // Ends the transfer: reads and discards whatever of the payload is still
+    // unread, then checks the CRC32 and replies "@epi crc ok" (true) or
+    // "@epi err crc mismatch ..." (false). After a timeout, which has been
+    // replied to already, returns false and replies nothing.
+    bool finish();
+
+private:
+    uint32_t _length;
+    uint32_t _want_crc;
+    uint32_t _crc = 0;
+    uint32_t _offset = 0;
+    uint32_t _chunk_end;
+    TickType_t _chunk_start;
+    bool _failed = false;
+};
+static_assert(idfxx::byte_source<payload_source>);
 
 // The per-panel frame handler: validate the header, receive the payload,
 // show the frame. Returns after replying "@epi done ..." (true) or

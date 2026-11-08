@@ -43,44 +43,6 @@ bool read_by(uint8_t* dst, size_t n, TickType_t start, TickType_t timeout) {
     return true;
 }
 
-// Reads n bytes into the logical byte range [off, off + n) of dst.
-bool read_into(std::span<const std::span<uint8_t>> dst, size_t off, size_t n, TickType_t timeout) {
-    const TickType_t start = xTaskGetTickCount();
-    for (const auto& seg : dst) {
-        if (n == 0) {
-            break;
-        }
-        if (off >= seg.size()) {
-            off -= seg.size();
-            continue;
-        }
-        const size_t take = std::min(n, seg.size() - off);
-        if (!read_by(seg.data() + off, take, start, timeout)) {
-            return false;
-        }
-        n -= take;
-        off = 0;
-    }
-    return n == 0;
-}
-
-uint32_t crc_range(uint32_t running, std::span<const std::span<uint8_t>> dst, size_t off, size_t n) {
-    for (const auto& seg : dst) {
-        if (n == 0) {
-            break;
-        }
-        if (off >= seg.size()) {
-            off -= seg.size();
-            continue;
-        }
-        const size_t take = std::min(n, seg.size() - off);
-        running = esp_rom_crc32_le(running, seg.data() + off, take);
-        n -= take;
-        off = 0;
-    }
-    return running;
-}
-
 } // namespace
 
 // --- UART ---
@@ -176,21 +138,48 @@ void drain_input() {
     g_transport->flush_input();
 }
 
-bool receive_payload(std::span<const std::span<uint8_t>> dst, const header& h) {
-    uint32_t running = 0;
+payload_source::payload_source(const header& h)
+    : _length(h.length)
+    , _want_crc(h.crc)
+    , _chunk_end(std::min<uint32_t>(CHUNK, h.length)) {
     send_line("ok 0");
-    for (uint32_t off = 0; off < h.length;) {
-        const size_t n = std::min<size_t>(CHUNK, h.length - off);
-        if (!read_into(dst, off, n, CHUNK_TIMEOUT)) {
-            send_line("err timeout at offset %lu", (unsigned long)off);
+    _chunk_start = xTaskGetTickCount();
+}
+
+idfxx::result<size_t> payload_source::try_read(std::span<uint8_t> buf) {
+    if (_failed) {
+        return idfxx::error(idfxx::errc::timeout);
+    }
+    const size_t n = std::min<size_t>(buf.size(), _chunk_end - _offset);
+    if (n == 0) {
+        return 0;
+    }
+    const TickType_t elapsed = xTaskGetTickCount() - _chunk_start;
+    const int r = elapsed < CHUNK_TIMEOUT ? g_transport->read(buf.data(), n, CHUNK_TIMEOUT - elapsed) : 0;
+    if (r <= 0) {
+        send_line("err timeout at offset %lu", (unsigned long)(_offset / CHUNK * CHUNK));
+        _failed = true;
+        return idfxx::error(idfxx::errc::timeout);
+    }
+    _crc = esp_rom_crc32_le(_crc, buf.data(), size_t(r));
+    _offset += uint32_t(r);
+    if (_offset == _chunk_end) {
+        send_line("ok %lu", (unsigned long)_offset);
+        _chunk_end = std::min<uint32_t>(_offset + CHUNK, _length);
+        _chunk_start = xTaskGetTickCount();
+    }
+    return size_t(r);
+}
+
+bool payload_source::finish() {
+    uint8_t junk[256];
+    while (_offset < _length) {
+        if (!try_read(junk)) {
             return false;
         }
-        running = crc_range(running, dst, off, n);
-        off += n;
-        send_line("ok %lu", (unsigned long)off);
     }
-    if (running != h.crc) {
-        send_line("err crc mismatch: got %08lx want %08lx", (unsigned long)running, (unsigned long)h.crc);
+    if (_crc != _want_crc) {
+        send_line("err crc mismatch: got %08lx want %08lx", (unsigned long)_crc, (unsigned long)_want_crc);
         return false;
     }
     send_line("crc ok");

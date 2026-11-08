@@ -28,65 +28,30 @@ def convert_frame(levels, mode):
     return b"".join(send.pack_codes(row, bpp) for row in levels)
 
 
-# --- Reference framebuffers, transcribed from the idfxx headers -------------------
-# idfxx_epaper/include/idfxx/epaper/mono_framebuffer.hpp: starts all 0xFF
-# (white); byte y * stride + x / 8, bit 7 - x % 8; set_pixel(ink=true) clears
-# the bit (a set bit is white paper).
-# gray4_framebuffer.hpp + color.hpp: gray4 white=0, light=1, dark=2, black=3;
-# plane 0 holds bit 0, plane 1 bit 1, same bit layout; starts all 0 (white).
+# --- Reference frames, transcribed from idfxx_epaper's ink_writer.hpp -------------
+# write_inks frames: rows top to bottom, high bits first. Mono: 1 bpp, 1 white,
+# 0 black. Gray4: 2 bpp, 0 the darkest .. 3 the lightest.
 
 
-def ref_mono(ink) -> bytes:
-    stride = (W + 7) // 8
-    data = bytearray([0xFF]) * (stride * H)
+def ref_inks(levels, bpp) -> bytes:
+    stride = W * bpp // 8
+    data = bytearray(stride * H)
     for y in range(H):
         for x in range(W):
-            if ink[y][x]:
-                data[y * stride + x // 8] &= ~(1 << (7 - x % 8)) & 0xFF
-    return bytes(data)
-
-
-def ref_grey4(grey) -> bytes:
-    stride = (W + 7) // 8
-    size = stride * H
-    data = bytearray(2 * size)
-    for y in range(H):
-        for x in range(W):
-            g = grey[y][x]
-            mask = 1 << (7 - x % 8)
-            if g & 1:
-                data[y * stride + x // 8] |= mask
-            if g & 2:
-                data[size + y * stride + x // 8] |= mask
+            shift = 8 - bpp - (x * bpp) % 8
+            data[y * stride + x * bpp // 8] |= levels[y][x] << shift
     return bytes(data)
 
 
 # --- Frames -> payload -----------------------------------------------------------------
 
 
-def test_mono_frame_is_the_payload():
-    lv = random_levels("mono", seed=2)
-    frame = convert_frame(lv, "mono")
-    assert send.Target("ee05", "mono").to_wire(frame) == frame
-    assert frame == ref_mono([[v == 0 for v in row] for row in lv])
-
-
-def test_grey4_plane_bit_layout():
-    white = bytes([0xFF]) * 96000  # level 3 everywhere: gray4 0 in both planes
-    assert send.grey4_to_planes(white) == b"\x00" * 96000
-    frame = bytearray(white)
-    frame[0], frame[1] = 0x1B, 0xFF  # row 0 levels 0, 1, 2, 3, 3, 3, 3, 3 -> gray4 3, 2, 1, 0, 0, ...
-    p = send.grey4_to_planes(bytes(frame))
-    assert len(p) == 96000
-    assert p[0] == 0xA0  # plane 0, bit 0: 1, 0, 1, 0, ...
-    assert p[48000] == 0xC0  # plane 1, bit 1: 1, 1, 0, 0, ...
-    assert send.grey4_to_planes(bytes(96000)) == b"\xff" * 96000  # all black
-
-
-def test_grey4_payload_matches_idfxx_reference():
-    lv = random_levels("grey4", seed=3)
-    got = send.Target("ee05", "grey4").to_wire(convert_frame(lv, "grey4"))
-    assert got == ref_grey4([[3 - v for v in row] for row in lv])
+@pytest.mark.parametrize("mode,bpp,seed", [("mono", 1, 2), ("grey4", 2, 3)])
+def test_frame_is_the_payload(mode, bpp, seed):
+    lv = random_levels(mode, seed)
+    frame = convert_frame(lv, mode)
+    assert send.Target("ee05", mode).to_wire(frame) == frame
+    assert frame == ref_inks(lv, bpp)
 
 
 @pytest.mark.parametrize("mode,size", [("mono", 48000), ("grey4", 96000)])
@@ -156,7 +121,7 @@ def test_cli_out_grey4_round_trip(tmp_path):
     src.write_bytes(convert_frame(lv, "grey4"))
     out = tmp_path / "wire.bin"
     assert send.main(["--panel", "ee05", "--mode", "grey4", "--out", str(out), "frame", str(src)]) == 0
-    assert out.read_bytes() == send.grey4_to_planes(src.read_bytes())
+    assert out.read_bytes() == src.read_bytes()
 
 
 def test_cli_mode_rules(tmp_path, capsys):

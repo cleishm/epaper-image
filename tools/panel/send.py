@@ -10,9 +10,7 @@ Usage (see README.md for the wire protocol):
 
 FRAME.bin is convert's OUTPUT for the matching panel: --panel e1004 takes
 `convert --panel el133uf1`, --panel ee05 --mode mono `gdey075t7-mono`,
---mode grey4 `gdey075t7-grey4`. Frames are sent as they are, except grey4,
-which is repacked from convert's 2 bpp rows into the two bit planes the EE05
-firmware receives.
+--mode grey4 `gdey075t7-grey4`. Frames are sent as they are.
 
 Common flags: --panel, --mode, --port, --baud, --out PATH (write the payload
 that would be sent, instead of sending). Needs only pyserial.
@@ -51,12 +49,10 @@ DEFAULT_BAUD = 921_600
 # Keep in sync with firmware-ee05/main/main.cpp and README.md. The driver's
 # native layout is landscape: 800 wide (sources) x 480 tall (gates).
 EE05_W, EE05_H = 800, 480
-EE05_STRIDE = EE05_W // 8  # 100 bytes per row per 1-bpp plane
-EE05_PLANE = EE05_STRIDE * EE05_H  # 48000
 EE05_MODES = ("mono", "grey4")
 EE05_LEVELS = {"mono": 2, "grey4": 4}  # level index 0 = black .. n-1 = white
 EE05_MAGIC = {"mono": b"EPI2", "grey4": b"EPI3"}
-EE05_BYTES = {"mono": EE05_PLANE, "grey4": 2 * EE05_PLANE}
+EE05_BYTES = {"mono": EE05_W // 8 * EE05_H, "grey4": EE05_W // 4 * EE05_H}  # 48000, 96000
 # Espressif's USB-Serial-JTAG (the XIAO ESP32-S3's native USB port).
 ESPRESSIF_USJ_VID_PID = (0x303A, 0x1001)
 
@@ -88,39 +84,6 @@ def check_e1004(frame: bytes, label: str = "frame") -> None:
         y, x = divmod(first, STRIDE)
         raise SendError(f"{label}: byte {first} (x={2 * x}, y={y}) is 0x{frame[first]:02x}, not two ink "
                         f"codes; {flags.count(1)} such byte(s)")
-
-
-def _grey4_plane_nibbles() -> tuple[bytes, bytes]:
-    """For each 2 bpp byte (four levels, leftmost in bits 7-6): the four bits
-    it contributes to plane 0 and to plane 1, leftmost in bit 3."""
-    lo, hi = bytearray(256), bytearray(256)
-    for b in range(256):
-        for i in range(4):
-            g = 3 - ((b >> (6 - 2 * i)) & 3)  # gray4: white 0 .. black 3
-            lo[b] |= (g & 1) << (3 - i)
-            hi[b] |= (g >> 1) << (3 - i)
-    return bytes(lo), bytes(hi)
-
-
-_GREY4_LO, _GREY4_HI = _grey4_plane_nibbles()
-
-
-def grey4_to_planes(frame: bytes) -> bytes:
-    """convert's grey4 frame (2 bpp level indices) -> the EE05 grey4 payload.
-
-    The firmware receives the idfxx gray4_framebuffer layout: two 1-bpp
-    planes, row-major, 100 bytes per row, bit 7 of each byte the leftmost
-    pixel; each pixel a gray4 level, white = 0, light = 1, dark = 2,
-    black = 3, i.e. 3 - level index; plane 0 holds bit 0 of it and plane 1
-    bit 1, sent plane 0 then plane 1. 96000 bytes. (The driver inverts the
-    planes on the way to the controller; that is not the host's concern.)
-    """
-    if len(frame) != EE05_BYTES["grey4"]:
-        raise SendError(f"grey4: {len(frame)} bytes, want {EE05_BYTES['grey4']}")
-    pairs = list(zip(frame[0::2], frame[1::2]))  # two 2 bpp bytes = 8 pixels = one plane byte
-    p0 = bytes((_GREY4_LO[a] << 4) | _GREY4_LO[b] for a, b in pairs)
-    p1 = bytes((_GREY4_HI[a] << 4) | _GREY4_HI[b] for a, b in pairs)
-    return p0 + p1
 
 
 def pack_codes(codes: list[int], bpp: int) -> bytes:
@@ -184,10 +147,7 @@ class Target:
                             f"bytes (convert --panel {self.convert_panel})")
         if self.panel == "e1004":
             check_e1004(frame, label)
-            return frame
-        if self.mode == "mono":
-            return frame  # already the idfxx mono_framebuffer layout: a set bit is white
-        return grey4_to_planes(frame)
+        return frame
 
     def test_frame(self) -> bytes:
         return e1004_test_frame() if self.panel == "e1004" else ee05_test_frame(self.mode)

@@ -4,6 +4,6 @@
 idf_component_register(
     SRCS "protocol.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES esp_driver_uart esp_driver_usb_serial_jtag freertos
+    REQUIRES esp_driver_uart esp_driver_usb_serial_jtag freertos idfxx_core
     PRIV_REQUIRES esp_rom
 )
