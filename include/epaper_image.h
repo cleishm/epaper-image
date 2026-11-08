@@ -22,7 +22,7 @@ extern "C" {
 /** @brief Library major version. */
 #define EPI_VERSION_MAJOR 0
 /** @brief Library minor version. */
-#define EPI_VERSION_MINOR 3
+#define EPI_VERSION_MINOR 4
 /** @brief Library patch version. */
 #define EPI_VERSION_PATCH 0
 
@@ -122,6 +122,19 @@ typedef struct epi_panel {
     size_t preset_count;
     const epi_panel_tables_t* tables;
 } epi_panel_t;
+
+/**
+ * @brief Find one of a panel's presets by name.
+ *
+ * @param panel The panel; may be NULL.
+ * @param name  The preset's name, ignoring the case of ASCII letters, or
+ *              NULL for the panel's default preset.
+ *
+ * @return The preset's intent, or NULL if @p panel is NULL or the panel has
+ *         no preset of that name. A NULL intent in epi_config_t selects the
+ *         panel's default preset.
+ */
+const epi_intent_t* epi_panel_preset(const epi_panel_t* panel, const char* name);
 
 /** @brief E Ink EL133UF1, Spectra 6, 13.3" 1200x1600 (reTerminal E1004). */
 extern const epi_panel_t epi_panel_el133uf1;

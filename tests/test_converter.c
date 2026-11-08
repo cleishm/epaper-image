@@ -690,3 +690,25 @@ void test_converter_goldens_without_neutral(void) {
     p.tables = &off.base;
     check_goldens(&p, goldens_without_neutral);
 }
+
+/* epi_panel_preset finds every listed preset by name in any case, NULL finds
+ * the default, and nothing else is found. */
+void test_panel_preset(void) {
+    const epi_panel_t* panels[] = {&epi_panel_el133uf1, &epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
+    for (size_t p = 0; p < sizeof panels / sizeof panels[0]; p++) {
+        const epi_panel_t* panel = panels[p];
+        for (size_t i = 0; i < panel->preset_count; i++) {
+            TEST_ASSERT_EQUAL_PTR(panel->presets[i].intent, epi_panel_preset(panel, panel->presets[i].name));
+        }
+        TEST_ASSERT_EQUAL_PTR(panel->presets[1].intent, epi_panel_preset(panel, "soft"));
+        TEST_ASSERT_EQUAL_PTR(panel->presets[1].intent, epi_panel_preset(panel, "SOFT"));
+        TEST_ASSERT_NULL(epi_panel_preset(panel, "Sof"));
+        TEST_ASSERT_NULL(epi_panel_preset(panel, "Softer"));
+        TEST_ASSERT_NULL(epi_panel_preset(panel, ""));
+        TEST_ASSERT_EQUAL_PTR(panel->presets[0].intent, epi_panel_preset(panel, NULL));
+    }
+    TEST_ASSERT_NOT_NULL(epi_panel_preset(&epi_panel_el133uf1, "Bright"));
+    TEST_ASSERT_NULL(epi_panel_preset(&epi_panel_gdey075t7_grey4, "Bright"));
+    TEST_ASSERT_NULL(epi_panel_preset(NULL, "Default"));
+    TEST_ASSERT_NULL(epi_panel_preset(NULL, NULL));
+}
