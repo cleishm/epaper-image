@@ -142,6 +142,49 @@ jobs:
       - name: Test
         run: ctest --test-dir build-wasm --output-on-failure
 
+  # The host suite on ESP32 targets under QEMU (tests/esp_idf/README.md); the
+  # fingerprint and golden tests check that their output is byte-identical too.
+  esp-idf-qemu:
+    runs-on: ubuntu-latest
+    name: ubuntu-latest / esp-idf qemu (${{ matrix.target }})
+    container: espressif/idf:v6.1
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Xtensa LX6, Xtensa LX7, RISC-V.
+        target: [esp32, esp32s3, esp32c3]
+    defaults:
+      run:
+        working-directory: tests/esp_idf
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # As in the README. The image comes with QEMU. The job does not run the
+      # image's entrypoint, so each step activates ESP-IDF itself.
+      - name: Build
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf() { python "$IDF_PATH/tools/idf.py" "$@"; }
+          t=${{ matrix.target }}
+          idf -B build_$t -D SDKCONFIG=build_$t/sdkconfig \
+              -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qemu" set-target $t
+          idf -B build_$t -D SDKCONFIG=build_$t/sdkconfig build
+
+      # Fails on a test failure, a panic or the timeout.
+      - name: Test
+        run: |
+          . "$IDF_PATH/export.sh"
+          ./run_qemu.sh ${{ matrix.target }} 2400
+
+      - name: Upload QEMU log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: qemu-log-${{ matrix.target }}
+          path: tests/esp_idf/build_${{ matrix.target }}/qemu.log
+
   panelgen:
     # Any Unix with a C compiler generates the same files; on Windows the headers
     # differ (tools/panelgen/README.md).
@@ -193,7 +236,7 @@ jobs:
   # editing the ruleset.
   all-checks:
     if: always()
-    needs: [format, build, sanitizers, emscripten, panelgen, panel]
+    needs: [format, build, sanitizers, emscripten, esp-idf-qemu, panelgen, panel]
     runs-on: ubuntu-latest
     steps:
       - name: Check that every required job succeeded

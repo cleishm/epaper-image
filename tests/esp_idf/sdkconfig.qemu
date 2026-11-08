@@ -1,0 +1,6 @@
+# QEMU builds only, listed after sdkconfig.defaults (see README.md).
+
+# The console is UART0, which QEMU captures. This undoes the esp32s3
+# hardware console from sdkconfig.defaults.esp32s3: QEMU does not emulate the
+# esp32s3 USB-Serial-JTAG port.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
