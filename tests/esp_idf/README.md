@@ -36,23 +36,30 @@ call `python "$IDF_PATH/tools/idf.py"`. From this directory:
 source ~/.espressif/tools/activate_idf_v6.1.sh
 idf() { python "$IDF_PATH/tools/idf.py" "$@"; }
 
-for t in esp32 esp32c3; do
-    idf -B build_$t -D SDKCONFIG=build_$t/sdkconfig set-target $t
+for t in esp32 esp32s3 esp32c3; do
+    idf -B build_$t -D SDKCONFIG=build_$t/sdkconfig \
+        -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.qemu" set-target $t
     idf -B build_$t -D SDKCONFIG=build_$t/sdkconfig build
 done
 
-./run_qemu.sh esp32      # Xtensa; log in build_esp32/qemu.log
+./run_qemu.sh esp32      # Xtensa LX6; log in build_esp32/qemu.log
+./run_qemu.sh esp32s3    # Xtensa LX7; log in build_esp32s3/qemu.log
 ./run_qemu.sh esp32c3    # RISC-V; log in build_esp32c3/qemu.log
 ```
+
+`sdkconfig.qemu` sets the UART0 console, which QEMU captures, in place of the
+esp32s3 hardware console below: QEMU does not emulate the esp32s3
+USB-Serial-JTAG port. CI (the `esp-idf-qemu` job) builds and runs the suite
+this way on all three targets.
 
 `run_qemu.sh <target> [timeout_s]` runs `idf.py qemu` (which also rebuilds
 if sources changed) and captures the serial console to
 `build_<target>/qemu.log`. It waits for the app's `EPI_TESTS_DONE` line, a
-panic or the timeout (default 3 h), then stops QEMU. It exits 0 when no
+panic or the timeout (default 2 h), then stops QEMU. It exits 0 when no
 test failed. If the activation script did not put `qemu-system-xtensa` /
 `qemu-system-riscv32` on PATH (it only does so for the exact version
 tools.json recommends), the script uses the newest build installed under
-`$IDF_TOOLS_PATH/qemu-*`. The two targets can run in parallel.
+`$IDF_TOOLS_PATH/qemu-*`. The targets can run in parallel.
 
 To run interactively, use
 `idf -B build_esp32 -D SDKCONFIG=build_esp32/sdkconfig qemu monitor`

@@ -3,12 +3,13 @@
 # suite finishes (or panics, or times out). Requires an activated ESP-IDF
 # environment (IDF_PATH set) and a prior build into build_<target>.
 #
-#   usage: run_qemu.sh <esp32|esp32c3> [timeout_seconds]
+#   usage: run_qemu.sh <esp32|esp32s3|esp32c3> [timeout_seconds]
 #
 # The serial log goes to build_<target>/qemu.log. Exit status: 0 when the
 # suite reports no failures, 1 on test failures, 2 on panic/timeout.
 set -u
-target=${1:?usage: run_qemu.sh <esp32|esp32c3> [timeout_seconds]}
+usage="usage: run_qemu.sh <esp32|esp32s3|esp32c3> [timeout_seconds]"
+target=${1:?$usage}
 timeout_s=${2:-7200}
 dir=$(cd "$(dirname "$0")" && pwd)
 build="$dir/build_$target"
@@ -18,8 +19,12 @@ log="$build/qemu.log"
 # The activation script puts QEMU on PATH only when the installed build is
 # the exact version tools.json recommends; otherwise use the newest installed.
 case $target in
-esp32) qemu_tool=qemu-xtensa qemu_prog=qemu-system-xtensa ;;
-*) qemu_tool=qemu-riscv32 qemu_prog=qemu-system-riscv32 ;;
+esp32 | esp32s3) qemu_tool=qemu-xtensa qemu_prog=qemu-system-xtensa ;;
+esp32c3) qemu_tool=qemu-riscv32 qemu_prog=qemu-system-riscv32 ;;
+*)
+    echo "$usage" >&2
+    exit 2
+    ;;
 esac
 if ! command -v "$qemu_prog" >/dev/null; then
     qemu_bin=$(ls -d "${IDF_TOOLS_PATH:-$HOME/.espressif/tools}/$qemu_tool"/*/qemu/bin 2>/dev/null | sort | tail -1)
