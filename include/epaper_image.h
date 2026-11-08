@@ -79,6 +79,12 @@ typedef struct {
 
 /**
  * @brief Rendering intent. Every preset is a value of this.
+ *
+ * Start a custom intent from a preset and change the values you want, as in
+ * `epi_intent_t it = *epi_panel_preset(panel, NULL); it.tone = 0.3f;`. A
+ * zero-initialised intent is valid but renders poorly: vibrance 0 removes
+ * colour (1 is off), and detail and adapt 0 are far from every preset's 0.75
+ * and 0.5.
  */
 typedef struct {
     /** 0 = black-point-compensated lightness (Soft) .. 1 = midtone curve (Deep). */

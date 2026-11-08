@@ -40,9 +40,12 @@ Each panel's calibration is an `epi_panel_t` named after the panel:
 Each calibration has named presets, and the first is the default. To use one,
 set `epi_config_t`'s `intent` to `epi_panel_preset(panel, "Soft")` (any case),
 which returns the default for a NULL name and NULL (also the default) for a
-name the panel lacks. For other settings, pass your own `epi_intent_t`. A panel's grey
-levels depend on how it is driven, so a different waveform, frame rate,
-voltage, LUT or driver needs its own calibration.
+name the panel lacks. For other settings, copy a preset's `epi_intent_t`, change
+the values you want and pass a pointer to the copy. Starting from zero is a
+trap: vibrance 0 removes colour (1 is off).
+
+A panel's grey levels depend on how it is driven, so a different waveform,
+frame rate, voltage, LUT or driver needs its own calibration.
 
 The reTerminal E1001 is likely the same panel as the GDEY075T7, but it has not
 been measured.
