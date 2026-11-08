@@ -3,14 +3,16 @@
 // Receives one packed native frame over the XIAO's USB-Serial-JTAG port and
 // shows it pixel-exact, in one of two formats chosen by the header magic:
 //
-//   EPI2  mono:  1 bpp, the idfxx mono_framebuffer layout (row-major,
-//         100 bytes per row, bit 7 = leftmost pixel, set bit = white),
-//         48000 bytes; shown with the full (OTP) waveform.
-//   EPI3  grey4: 2 bpp as two 1-bpp planes in the idfxx gray4_framebuffer
-//         layout (plane 0 = bit 0 of the gray4 level, then plane 1 = bit 1;
-//         gray4 white = 0 ... black = 3), 96000 bytes; shown with the
+//   EPI2  mono:  1 bpp, row-major, 100 bytes per row, bit 7 = leftmost
+//         pixel, set bit = white, 48000 bytes; shown with the full (OTP)
+//         waveform.
+//   EPI3  grey4: 2 bpp, row-major, 200 bytes per row, bits 7-6 = leftmost
+//         pixel, 0 = black ... 3 = white, 96000 bytes; shown with the
 //         driver's 4-grey waveform (loaded through registers, default 20 Hz
 //         at +/-15 V; ~9.0 s) after a black/white scrub.
+//
+// Both are idfxx write_inks frames, as tools/convert writes them, received
+// into the mono_framebuffer or the gray4_framebuffer.
 //
 // The wire protocol (shared with the E1004 firmware, ../../components/
 // epi_protocol) is specified in ../../README.md; the host side is
@@ -25,13 +27,13 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <idfxx/epaper/gray4_framebuffer>
+#include <idfxx/epaper/ink_writer>
 #include <idfxx/epaper/mono_framebuffer>
 #include <idfxx/epaper/uc8179>
 #include <idfxx/gpio>
 #include <idfxx/panel_io>
 #include <idfxx/spi/master>
 #include <optional>
-#include <span>
 
 namespace {
 
@@ -47,7 +49,8 @@ constexpr auto PIN_POWER = idfxx::gpio_43; // display power enable, active high
 // --- Frame formats (keep in sync with send.py and README.md) ---
 constexpr uint16_t WIDTH = 800;
 constexpr uint16_t HEIGHT = 480;
-constexpr uint32_t PLANE_BYTES = WIDTH / 8 * HEIGHT; // 48000
+constexpr uint32_t MONO_BYTES = WIDTH / 8 * HEIGHT;  // 48000
+constexpr uint32_t GREY4_BYTES = WIDTH / 4 * HEIGHT; // 96000
 constexpr char KIND_MONO = '2';
 constexpr char KIND_GREY4 = '3';
 
@@ -141,7 +144,7 @@ bool handle_frame(const epi::header& h) {
         return false;
     }
     const bool grey = h.kind == KIND_GREY4;
-    const uint32_t want = grey ? 2 * PLANE_BYTES : PLANE_BYTES;
+    const uint32_t want = grey ? GREY4_BYTES : MONO_BYTES;
     if (h.width != WIDTH || h.height != HEIGHT || h.length != want) {
         send_line(
             "err header EPI%c %ux%u len %lu (want %ux%u len %lu)",
@@ -160,18 +163,17 @@ bool handle_frame(const epi::header& h) {
         return false;
     }
 
-    // Payload received straight into the framebuffer: every byte value is
-    // a valid pixel pattern (800 is a multiple of 8: no padding bits), so
-    // there is nothing to check beyond the CRC.
-    bool ok;
-    if (grey) {
-        const std::span<uint8_t> dst[]{g_grey->plane(0), g_grey->plane(1)};
-        ok = epi::receive_payload(dst, h);
-    } else {
-        const std::span<uint8_t> dst[]{g_mono->data()};
-        ok = epi::receive_payload(dst, h);
+    // Payload received into the framebuffer a band at a time. Every value is
+    // a valid ink (800 is a multiple of 8: no padding bits), so there is
+    // nothing to check beyond the CRC.
+    epi::payload_source payload(h);
+    const auto written =
+        grey ? idfxx::epaper::try_write_inks(*g_grey, payload) : idfxx::epaper::try_write_inks(*g_mono, payload);
+    if (!payload.finish()) {
+        return false;
     }
-    if (!ok) {
+    if (!written) {
+        send_line("err inks: %s", written.error().message().c_str());
         return false;
     }
 

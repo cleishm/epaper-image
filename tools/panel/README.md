@@ -13,9 +13,9 @@ panels:
 
 Frames come from the library's command-line tool, `tools/convert` (built with
 the library; see the top-level README). It writes the packed frame that the
-panel is sent. `send.py` checks the frame and sends it. Nothing is resampled or
-colour-converted on the way. Only EE05 grey4 frames change, repacked into the
-firmware's bit planes.
+panel is sent. `send.py` checks the frame and sends it as it is. Nothing is
+resampled or colour-converted on the way. The firmwares read it with idfxx's
+`write_inks`, which takes the frames convert writes.
 
 ```
 firmware-e1004/        E1004 ESP-IDF project
@@ -141,11 +141,12 @@ never assumes alignment:
   [EE05](#ee05)). A firmware replies `@epi err header ...` to a format it
   does not show (for example an E1004 frame sent to the EE05), then drains.
 
-**Payload.** This is the panel's native frame: 1200 wide x 1600 tall, row-major,
-4 bits per pixel, two pixels per byte with the **high nibble the left (even-x)
-pixel**, 600 bytes per row, 960000 bytes. Nibbles are panel codes: black 0,
-white 1, yellow 2, red 3, blue 5, green 6 (4 and 7-15 are invalid). Because
-`E` (0x45) contains nibble 4, a magic can never appear inside a valid payload.
+**Payload.** This is the panel's native frame, as `write_inks` takes it in
+colour6 mode: 1200 wide x 1600 tall, row-major, 4 bits per pixel, two pixels
+per byte with the **high nibble the left (even-x) pixel**, 600 bytes per row,
+960000 bytes. Nibbles are panel codes: black 0, white 1, yellow 2, red 3,
+blue 5, green 6 (4 and 7-15 are invalid). Because `E` (0x45) contains nibble 4,
+a magic can never appear inside a valid payload.
 
 **Sequence.**
 
@@ -158,12 +159,16 @@ white 1, yellow 2, red 3, blue 5, green 6 (4 and 7-15 are invalid). Because
    replies `@epi ok 0` (or `@epi err header ...`).
 3. The host sends the payload in chunks of `min(4096, remaining)` bytes (235
    chunks, the last 1536 bytes), waiting after each for `@epi ok <offset of
-   next byte>` (5 s host timeout). The device receives each chunk directly into
-   its frame buffer and prints nothing else in the meantime. If a chunk does not
-   complete within 3 s, the device replies `@epi err timeout at offset <n>`.
-4. After the last chunk, the device compares the CRC32 (`@epi crc ok` or
-   `@epi err crc mismatch ...`). It then rejects the frame if any nibble is 4 or
-   greater than 6 (`@epi err invalid ink code at byte ...`).
+   next byte>` (5 s host timeout). The device reads the payload with
+   `write_inks`, which fills its framebuffer a band of rows at a time, and
+   prints nothing else in the meantime. If a chunk does not complete within 3 s,
+   the device replies `@epi err timeout at offset <n>` (the chunk's start).
+4. `write_inks` rejects a band holding a nibble that is 4 or greater than 6.
+   The device still receives the rest of the payload, acking as usual. After
+   the last chunk, it compares the CRC32 (`@epi crc ok` or
+   `@epi err crc mismatch ...`), so a corrupted transfer gives its CRC
+   mismatch. If the CRC matches but a band was rejected, it then replies
+   `@epi err inks: ...`.
 5. The device wakes the panel if it is asleep, writes the frame and refreshes
    (25-30 s, longer cold). It then puts the panel into deep sleep (the image
    stays when unpowered) and replies `@epi done <ms>` (host timeout 180 s by
@@ -236,9 +241,7 @@ $PY tools/panel/send.py --panel ee05 --mode grey4 frame cmp.bin
   `mono`, `gdey075t7-grey4` (96000 bytes, 2 bpp level indices) for `grey4`.
   A frame of the wrong size is rejected, and the error names the `convert` panel
   to use.
-- `frame FRAME.bin`: mono frames are sent as they are. Grey4 frames are
-  repacked from convert's 2 bpp rows into the firmware's two bit planes
-  (below).
+- `frame FRAME.bin`: frames are sent as they are.
 - `convert --rotate` renders in portrait (480x800) and rotates the frame the
   same way as the E1004's landscape frames: portrait (x, y) goes to native
   (y, 479 - x). View the panel a quarter turn clockwise from native, with its
@@ -277,16 +280,15 @@ with these differences:
   an error during that wait (not mid-transfer).
 - **Header**: the same 16 bytes, magic `EPI2` (mono) or `EPI3` (grey4), width
   800, height 480, length 48000 (mono) or 96000 (grey4).
-- **Payload** (the idfxx framebuffer layouts, received straight into them):
-  - mono: 48000 bytes, `idfxx::epaper::mono_framebuffer`: row-major, 100
-    bytes per row, bit 7 the leftmost pixel. A **set bit is white** and a
-    cleared bit is black, so the bit is the level index.
-  - grey4: 96000 bytes, `idfxx::epaper::gray4_framebuffer`: plane 0 (bit 0 of
-    each pixel's `gray4` level) then plane 1 (bit 1), each in the mono layout.
-    `gray4` runs **white = 0**, light = 1, dark = 2, black = 3, that is,
-    `3 - level index`. (The driver inverts the planes on their way to the
-    controller.) `send.py` makes this from convert's 2 bpp frame
-    (`grey4_to_planes`).
+- **Payload** (convert's frames, as `write_inks` takes them, read into the
+  idfxx framebuffers):
+  - mono: 48000 bytes, row-major, 100 bytes per row, bit 7 the leftmost
+    pixel. A **set bit is white** and a cleared bit is black, so the bit is the
+    level index. Read into an `idfxx::epaper::mono_framebuffer`.
+  - grey4: 96000 bytes, row-major, 200 bytes per row, 2 bits per pixel with
+    bits 7-6 the leftmost pixel. Each pixel is its level index, **black = 0**
+    to white = 3. Read into an `idfxx::epaper::gray4_framebuffer`, which
+    `write_inks` fills with the levels in its two bit planes.
   - 800 is a multiple of 8, so there are no padding bits, and every byte
     value is a valid pixel pattern. The device checks only the CRC. (Unlike the
     E1004's, these payloads can contain the magic bytes. This is harmless,

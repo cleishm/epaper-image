@@ -4,6 +4,7 @@ dependencies:
   idf: ">=5.5"
   cleishm/idfxx_epaper_uc8179: "^2.0.0"
   cleishm/idfxx_epaper: "^2.0.0"
+  cleishm/idfxx_core: "^1.2.0"
   cleishm/idfxx_panel_io: "^2.0.0"
   cleishm/idfxx_spi: "^2.0.0"
   cleishm/idfxx_gpio: "^1.0.0"
