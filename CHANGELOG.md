@@ -3,6 +3,20 @@
 All notable changes to **epaper-image** are documented in this file. The project
 follows [semantic versioning](https://semver.org/).
 
+## v0.4.0
+
+Adds `epi_panel_preset`, which finds a panel's preset by name. The API is
+otherwise unchanged, and so is panel output.
+
+### Added
+
+- `epi_panel_preset(panel, name)` returns the intent of the panel's preset with
+  that name, ignoring the case of ASCII letters, or the default preset for a
+  `NULL` name. It returns `NULL` for a name the panel lacks, which
+  `epi_config_t` also takes as the default.
+- The docs now say to start a custom intent from a copy of a preset: a
+  zero-initialised intent has vibrance 0, which removes colour.
+
 ## v0.3.0
 
 Lightens the colour presets' lower midtones, corrects the EL133UF1's green cast
