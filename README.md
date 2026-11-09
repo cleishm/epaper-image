@@ -37,10 +37,15 @@ Each panel's calibration is an `epi_panel_t` named after the panel:
 | `epi_panel_gdey075t7_mono` | GDEY075T7, 7.5" 800x480, black and white (for example Seeed's 7.5" module on the XIAO EE05) |
 | `epi_panel_gdey075t7_grey4` | GDEY075T7, 7.5" 800x480, 4 greys, measured with idfxx_epaper_uc8179's 4-grey waveform at its default 20 Hz, ±15 V |
 
-Each calibration has named presets, and the first is the default. For other
-settings, pass your own `epi_intent_t` in `epi_config_t`. A panel's grey levels
-depend on how it is driven, so a different waveform, frame rate, voltage, LUT
-or driver needs its own calibration.
+Each calibration has named presets, and the first is the default. To use one,
+set `epi_config_t`'s `intent` to `epi_panel_preset(panel, "Soft")` (any case),
+which returns the default for a NULL name and NULL (also the default) for a
+name the panel lacks. For other settings, copy a preset's `epi_intent_t`, change
+the values you want and pass a pointer to the copy. Starting from zero is a
+trap: vibrance 0 removes colour (1 is off).
+
+A panel's grey levels depend on how it is driven, so a different waveform,
+frame rate, voltage, LUT or driver needs its own calibration.
 
 The reTerminal E1001 is likely the same panel as the GDEY075T7, but it has not
 been measured.
@@ -86,7 +91,7 @@ include(FetchContent)
 FetchContent_Declare(
     epaper_image
     GIT_REPOSITORY https://github.com/cleishm/epaper-image.git
-    GIT_TAG v0.3.0
+    GIT_TAG v0.4.0
 )
 FetchContent_MakeAvailable(epaper_image)
 

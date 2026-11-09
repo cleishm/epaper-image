@@ -26,7 +26,6 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-#include <ctype.h>
 #include <epaper_image.h>
 #include <errno.h>
 #include <math.h>
@@ -137,15 +136,6 @@ static int fail(const char* fmt, ...) {
     return 2;
 }
 
-static bool same_name(const char* a, const char* b) {
-    for (; *a && *b; a++, b++) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
-            return false;
-        }
-    }
-    return *a == *b;
-}
-
 static bool parse_float(const char* s, float* out) {
     char* end;
     errno = 0;
@@ -182,13 +172,12 @@ static float* intent_field(epi_intent_t* it, const char* key) {
 
 /* Copy the panel preset called name (any case) into *out. */
 static bool find_preset(const epi_panel_t* p, const char* name, epi_intent_t* out) {
-    for (size_t i = 0; i < p->preset_count; i++) {
-        if (same_name(p->presets[i].name, name)) {
-            *out = *p->presets[i].intent;
-            return true;
-        }
+    const epi_intent_t* it = epi_panel_preset(p, name);
+    if (it == NULL) {
+        return false;
     }
-    return false;
+    *out = *it;
+    return true;
 }
 
 static void list_presets(FILE* f, const epi_panel_t* p) {
@@ -207,7 +196,7 @@ static bool parse_cfg(const epi_panel_t* p, const char* cfg, epi_intent_t* out) 
     if (strlen(cfg) >= sizeof buf || cfg[0] == '\0') {
         return false;
     }
-    *out = *p->presets[0].intent;
+    *out = *epi_panel_preset(p, NULL);
     for (int pass = 0; pass < 2; pass++) { /* pass 0: preset, pass 1: values */
         strcpy(buf, cfg);
         for (char* item = strtok(buf, ","); item; item = strtok(NULL, ",")) {
@@ -387,7 +376,7 @@ static int parse_args(int argc, char** argv, options_t* o) {
 
     const epi_panel_t* p = o->panel->panel;
     o->intent_set = preset != NULL;
-    o->intent = *p->presets[0].intent;
+    o->intent = *epi_panel_preset(p, NULL);
     if (preset && !find_preset(p, preset, &o->intent)) {
         fprintf(stderr, "convert: %s has no preset %s (", o->panel->name, preset);
         list_presets(stderr, p);

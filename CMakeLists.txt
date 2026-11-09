@@ -19,7 +19,7 @@ if(ESP_PLATFORM)
 endif()
 
 project(epaper_image
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Image conversion for e-paper panels"
     HOMEPAGE_URL "https://github.com/cleishm/epaper-image"
     LANGUAGES C
