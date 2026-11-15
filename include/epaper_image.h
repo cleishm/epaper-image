@@ -6,6 +6,12 @@
  * adjustment, dynamic-range compression, palette matching and error
  * diffusion to panel ink codes. Rows of ink codes are then reduced to a
  * preview, packed for the panel, or both.
+ *
+ * Each push or pop does one row's work: a row and its filter windows (a
+ * resampler pop's vertical window grows with the vertical shrink ratio). So
+ * a frame can be rendered in steps: pause between any two calls,
+ * or abandon a render by not calling again. The output depends only on the
+ * configurations and the input rows, not on where the caller pauses.
  */
 
 #ifndef EPAPER_IMAGE_H
@@ -22,7 +28,7 @@ extern "C" {
 /** @brief Library major version. */
 #define EPI_VERSION_MAJOR 0
 /** @brief Library minor version. */
-#define EPI_VERSION_MINOR 4
+#define EPI_VERSION_MINOR 5
 /** @brief Library patch version. */
 #define EPI_VERSION_PATCH 0
 
@@ -467,12 +473,23 @@ typedef enum {
 #define EPI_MAX_SRC_DIMENSION 65535u
 
 /**
+ * @brief A rectangle in source pixels: origin (x, y), extent w × h.
+ *
+ * The region a layout frames, such as a user's crop. It follows the source
+ * rectangle rule of epi_resampler_config_t: finite, x, y ≥ 0, w, h > 0, and
+ * x + w ≤ src_width, y + h ≤ src_height (sums in float).
+ */
+typedef struct {
+    float x, y, w, h;
+} epi_rect_t;
+
+/**
  * @brief Resampler configuration.
  *
  * The source rectangle is resampled to dst_w × dst_h by separable
  * convolution: a horizontal pass, rounded and clamped to 8 bits, then a
  * vertical pass. Along each axis, scale = rectangle extent / output size;
- * output pixel i is centred at src_x + (i + 0.5)·scale and reads the source
+ * output pixel i is centred at src.x + (i + 0.5)·scale and reads the source
  * pixels within the filter's support of it (scaled by max(1, scale)), with
  * weights normalised to sum 1 and held in 22-bit fixed point. An axis at
  * scale 1 from offset 0, or a crop at integer offsets the size of the
@@ -491,10 +508,10 @@ typedef struct {
     uint32_t src_width, src_height;
     /**
      * Source rectangle to resample (crop / zoom / pan), in source pixels:
-     * finite, src_x, src_y ≥ 0, src_w, src_h > 0, and
-     * src_x + src_w ≤ src_width, src_y + src_h ≤ src_height (sums in float).
+     * finite, src.x, src.y ≥ 0, src.w, src.h > 0, and
+     * src.x + src.w ≤ src_width, src.y + src.h ≤ src_height (sums in float).
      */
-    float src_x, src_y, src_w, src_h;
+    epi_rect_t src;
     /** Output (panel) size, ≥ 1. */
     uint16_t dst_width, dst_height;
     /**
@@ -607,31 +624,39 @@ epi_err_t epi_resampler_push(epi_resampler_t* r, const epi_rgb_t* src_row);
 epi_err_t epi_resampler_pop(epi_resampler_t* r, epi_rgb_t* dst_row);
 
 /**
- * @brief Fill the source and placement rectangles to cover the output:
- *        scale to the larger of the two ratios and centre-crop.
+ * @brief Fill the source and placement rectangles to cover the output with a
+ *        region: scale to the larger of the two ratios and centre-crop.
  *
- * Reads src_width/src_height/dst_width/dst_height; writes src_x..src_h and
- * dst_x..dst_h. With scale = max(dst_width/src_width, dst_height/src_height)
- * (float), the axis that sets the scale takes the whole source extent
- * exactly, and the other takes dst/scale (at most the source extent),
- * centred: (src − size)/2. The placement is the whole output. Zero sizes
- * leave @p cfg unchanged. It does not check the source size limit; the
- * resampler does.
+ * Reads src_width/src_height/dst_width/dst_height; writes src and
+ * dst_x..dst_h. @p region is the part of the source to frame, NULL for the
+ * whole source. With scale = max(dst_width/region.w, dst_height/region.h)
+ * (float), the axis that sets the scale takes the whole region extent
+ * exactly, and the other takes dst/scale (at most the region extent),
+ * centred within the region: region start + (region extent − size)/2. The
+ * placement is the whole output. It does not check the source size limit;
+ * the resampler does.
+ *
+ * @return EPI_OK; EPI_ERR_INVALID_ARG, with @p cfg unchanged, for a NULL
+ *         @p cfg, a zero size, a region that breaks the rectangle rule
+ *         (epi_rect_t), or a result that breaks it.
  */
-void epi_layout_cover(epi_resampler_config_t* cfg);
+epi_err_t epi_layout_cover(epi_resampler_config_t* cfg, const epi_rect_t* region);
 
 /**
- * @brief Fill the source and placement rectangles to fit inside the output:
- *        scale to the smaller ratio and centre on the background.
+ * @brief Fill the source and placement rectangles to fit a region inside the
+ *        output: scale to the smaller ratio and centre on the background.
  *
- * The source rectangle is the whole source. With
- * scale = min(dst_width/src_width, dst_height/src_height) (float),
- * dst_w = round(src_width·scale), half away from zero, kept in
+ * The source rectangle is @p region, NULL for the whole source. With
+ * scale = min(dst_width/region.w, dst_height/region.h) (float),
+ * dst_w = round(region.w·scale), half away from zero, kept in
  * [1, dst_width]; dst_x = (dst_width − dst_w)/2, rounded down; likewise y.
- * Zero sizes leave @p cfg unchanged. It does not check the source size limit;
- * the resampler does.
+ * It does not check the source size limit; the resampler does.
+ *
+ * @return EPI_OK; EPI_ERR_INVALID_ARG, with @p cfg unchanged, for a NULL
+ *         @p cfg, a zero size, a region that breaks the rectangle rule
+ *         (epi_rect_t), or a result that breaks it.
  */
-void epi_layout_fit(epi_resampler_config_t* cfg);
+epi_err_t epi_layout_fit(epi_resampler_config_t* cfg, const epi_rect_t* region);
 
 /* ---- Preview reducer: ink-code rows in, smaller RGB rows out ------------- */
 

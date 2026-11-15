@@ -956,8 +956,7 @@ A build that only uses const panels doesn't link this file.
 
 The resampler (`src/epi_resampler.c`) resizes 8-bit sRGB by separable
 convolution, one axis at a time, in the gamma-encoded domain. It crops a
-source rectangle (`src_x`, `src_y`, `src_w`, `src_h`, in float source
-pixels) to a dst_w × dst_h rectangle and pastes it at (`dst_x`, `dst_y`) on a
+source rectangle (`src`, in float source pixels) to a dst_w × dst_h rectangle and pastes it at (`dst_x`, `dst_y`) on a
 dst_width × dst_height canvas of a background colour; the placement may
 overhang or miss the canvas, and only its visible part is computed. The
 coefficient computation is derived from Pillow's resampling code (see
@@ -1033,22 +1032,36 @@ used.
 An axis is copied instead of convolved when it is the identity: the output
 size equals the source size and the rectangle spans the whole axis from 0.
 Both axes are copied when the rectangle is an integer crop of exactly the
-output size (integer src_x and src_y, with src_w = dst_w and
-src_h = dst_h); a crop of exactly the output size along one axis only still
+output size (integer src.x and src.y, with src.w = dst_w and
+src.h = dst_h); a crop of exactly the output size along one axis only still
 convolves.
 
 ### Layout helpers
 
 `epi_layout_cover` and `epi_layout_fit` fill the rectangles for the two
-common layouts, in float. **Cover** fills the output and centre-crops: with
-scale = max(dst_width/src_width, dst_height/src_height), the axis that sets
-the scale takes the whole source extent and the other takes dst/scale (at
-most the source extent), centred at (src − size)/2; the placement is the
-whole output. **Fit** fits inside the output on the background: with
-scale = min(dst_width/src_width, dst_height/src_height), the rectangle is
-the whole source, dst_w = round(src_width·scale) (half away from zero, kept
+common layouts, in float. Each lays out a region of the source, an
+`epi_rect_t` in source pixels, such as the framing a user chose; NULL is the
+whole source. A layout works on the region's extents, region.w and region.h,
+and adds its origin to the source position, so a whole-source region gives
+exactly what NULL gives. **Cover** fills the output and centre-crops: with
+scale = max(dst_width/region.w, dst_height/region.h), the axis that sets
+the scale takes the whole region extent and the other takes dst/scale (at
+most the region extent), centred within the region at
+start + (extent − size)/2; the placement is the whole output. **Fit** fits
+inside the output on the background: with
+scale = min(dst_width/region.w, dst_height/region.h), the rectangle is
+the region, dst_w = round(region.w·scale) (half away from zero, kept
 in [1, dst_width]) and likewise dst_h, centred at
 ⌊(dst_width − dst_w)/2⌋ and ⌊(dst_height − dst_h)/2⌋.
+
+The region follows the same rule as the resampler's source rectangle, and so
+must the result, since the layout's output is meant to go straight to init.
+Two cases need care. A tiny region makes the fit scale huge or infinite, so an
+extent at or over the output size is taken as the output size without
+converting it to an integer. And a tiny region can make the cover crop extent
+underflow, so it is kept at the smallest normal float (at most the region
+extent). A layout whose result would break the rule returns
+`EPI_ERR_INVALID_ARG` and leaves the config unchanged.
 
 ## Fixed-point arithmetic and determinism
 
@@ -1324,6 +1337,41 @@ budget.
 The library does not automatically pick a cheaper filter or pre-shrink for
 untrusted images, because that would silently change output and add a second
 path.
+
+### Rendering in steps
+
+Each push and pop does a bounded amount of work, so a caller can render a
+frame in slices, a few rows at a time, and yield to a UI or check for
+cancellation between any two calls:
+
+- A converter push computes L\*src and one horizontal blur pass for its row.
+  A pop does one vertical blur pass and the intent and ditherer for one row:
+  a fixed amount per pixel, as the hull test, the cusp search and the
+  nearest-ink search are bounded loops.
+- A resampler push does one horizontal pass. A pop convolves one output
+  row's vertical window: the visible width times the vertical taps, which
+  grow with the vertical shrink ratio and the filter's support (at
+  dst_height 1 the window is the whole source rectangle's height).
+- The preview reducer and the packer work on one row per call.
+
+No call makes a pass over the image beyond those windows, and no stage adapts
+to the rows it has seen: the intent's adaptation is per pixel. Init work depends on the
+configuration, not on pixels. The one costly init, `epi_colour_panel_init`,
+depends on the inks rather than the image, reports progress and can be
+cancelled. Calls are bounded, but a push and the pops it releases need not
+be: background rows above the placement are ready before any push, and the
+converter's last push releases its last r + 1 rows. A caller that slices by
+time therefore counts pops, not pushes.
+
+The output depends only on the configurations and the input rows in order,
+not on how the calls are scheduled. The rings are indexed by row number, so a
+slot holds the same data whenever it is read; the ditherer's error rows move
+only in pop, one row per call, top to bottom; the resampler's vertical
+weights depend only on the output row. Pausing between any two calls changes
+nothing, and neither does popping later than the push contract asks, as long
+as no push is refused. A refused push writes nothing and does not advance the
+row count. There is no cancel call: a caller abandons a render by not calling
+again, and starts another by initialising over the same workspace.
 
 ### Output formats
 

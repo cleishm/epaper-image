@@ -461,10 +461,15 @@ static int render(
     rcfg.background = o->background;
     rcfg.filter = o->filter;
     rcfg.max_src_pixels = UINT32_MAX; /* the image is already decoded on a desktop machine */
+    epi_err_t err;
     if (o->fit) {
-        epi_layout_fit(&rcfg); /* whole image, centred on the background */
+        err = epi_layout_fit(&rcfg, NULL); /* whole image, centred on the background */
     } else {
-        epi_layout_cover(&rcfg); /* fill the cell, centre-cropped */
+        err = epi_layout_cover(&rcfg, NULL); /* fill the cell, centre-cropped */
+    }
+    if (err != EPI_OK) {
+        fprintf(stderr, "convert: %s: %s\n", o->fit ? "epi_layout_fit" : "epi_layout_cover", epi_strerror(err));
+        goto out;
     }
     /*
      * The library never allocates: the caller sizes and owns each workspace.
@@ -477,7 +482,7 @@ static int render(
         goto out;
     }
     epi_resampler_t* rs = NULL;
-    epi_err_t err = epi_resampler_init(&rcfg, rs_mem, rs_size, &rs);
+    err = epi_resampler_init(&rcfg, rs_mem, rs_size, &rs);
     if (err != EPI_OK) {
         fprintf(stderr, "convert: epi_resampler_init: %s\n", epi_strerror(err));
         goto out;

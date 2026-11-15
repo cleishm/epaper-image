@@ -146,6 +146,11 @@ static inline epi_config_t config(const epi_panel_t* p, uint16_t w, uint16_t h) 
     return c;
 }
 
+/* Lays out with layout 1 (cover) or 2 (fit). */
+static inline epi_err_t layout(uint8_t which, epi_resampler_config_t* c, const epi_rect_t* region) {
+    return which == 1 ? epi_layout_cover(c, region) : epi_layout_fit(c, region);
+}
+
 /* Streams img through a converter in ws (size bytes), popping until not OK
  * after every push and checking the lag (rows out = max(0, y − r + 1), all
  * after the last push). out receives H rows of W ink codes.

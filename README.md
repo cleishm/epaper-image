@@ -91,7 +91,7 @@ include(FetchContent)
 FetchContent_Declare(
     epaper_image
     GIT_REPOSITORY https://github.com/cleishm/epaper-image.git
-    GIT_TAG v0.4.0
+    GIT_TAG v0.5.0
 )
 FetchContent_MakeAvailable(epaper_image)
 
@@ -127,7 +127,9 @@ int convert(const epi_rgb_t* src, uint16_t src_w, uint16_t src_h, uint8_t* frame
         .dst_height = panel->height,
         .filter = EPI_FILTER_LANCZOS3,
     };
-    epi_layout_cover(&rcfg); /* sets the source crop and the placement */
+    /* Sets the source crop and the placement. NULL frames the whole source;
+     * an epi_rect_t frames part of it, such as a user's crop. */
+    if (epi_layout_cover(&rcfg, NULL) != EPI_OK) return rc;
 
     /* Converter: panel-sized rows in, ink codes out. */
     epi_config_t ccfg = {
@@ -291,8 +293,10 @@ allocates memory:
 ```c
 cfg.src_width = declared_width;
 cfg.src_height = declared_height;
-epi_layout_cover(&cfg);
-size_t size = epi_resampler_workspace_size(&cfg);
+size_t size = 0;
+if (epi_layout_cover(&cfg, NULL) == EPI_OK) {
+    size = epi_resampler_workspace_size(&cfg);
+}
 if (size == 0 || size > budget) {
     /* reject the image */
 }

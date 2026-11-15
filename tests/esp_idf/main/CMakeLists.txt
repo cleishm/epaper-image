@@ -12,6 +12,7 @@ idf_component_register(
          "${T}/test_colour_panel.c"
          "${T}/test_resampler.c"
          "${T}/test_preview.c"
+         "${T}/test_schedule.c"
     PRIV_INCLUDE_DIRS "${T}" "${T}/../src"
     PRIV_REQUIRES epaper-image unity esp_timer
 )
