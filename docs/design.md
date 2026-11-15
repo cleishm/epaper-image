@@ -1060,7 +1060,8 @@ must the result, since the layout's output is meant to go straight to init.
 Two cases need care. A tiny region makes the fit scale huge or infinite, so an
 extent at or over the output size is taken as the output size without
 converting it to an integer. And a tiny region can make the cover crop extent
-underflow to 0. A layout that cannot give a valid rectangle returns
+underflow, so it is kept at the smallest normal float (at most the region
+extent). A layout whose result would break the rule returns
 `EPI_ERR_INVALID_ARG` and leaves the config unchanged.
 
 ## Fixed-point arithmetic and determinism

@@ -47,6 +47,7 @@
 #include "epi_math.h"
 
 #include <assert.h>
+#include <float.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -607,13 +608,16 @@ static uint32_t epi_round_extent(float v, uint16_t max) {
     }
     uint32_t t = (uint32_t)v;
     t = (v - (float)t >= 0.5f) ? t + 1u : t;
-    return t < 1u ? 1u : (t > max ? max : t);
+    return t < 1u ? 1u : t; /* v < max, so t ≤ max */
 }
 
 /* A region side [start, start + side) cropped to extent len (at most the
  * side), centred within it. */
 static void epi_crop_axis(float start, float side, float len, float* pos, float* size) {
     *size = len > side ? side : len;
+    if (*size == 0.0f) { /* underflow for a tiny region: keep the smallest normal */
+        *size = side < FLT_MIN ? side : FLT_MIN;
+    }
     *pos = start + (side - *size) * 0.5f;
 }
 
@@ -623,11 +627,11 @@ static epi_err_t epi_layout(epi_resampler_config_t* cfg, const epi_rect_t* regio
     if (cfg == NULL || cfg->src_width == 0 || cfg->src_height == 0 || cfg->dst_width == 0 || cfg->dst_height == 0) {
         return EPI_ERR_INVALID_ARG;
     }
-    const float sw = (float)cfg->src_width, sh = (float)cfg->src_height;
     epi_rect_t r;
     if (region != NULL) {
         r = *region;
     } else {
+        const float sw = (float)cfg->src_width, sh = (float)cfg->src_height;
         r.x = 0.0f;
         r.y = 0.0f;
         r.w = sw;
@@ -651,7 +655,7 @@ static epi_err_t epi_layout(epi_resampler_config_t* cfg, const epi_rect_t* regio
         pw = epi_round_extent(r.w * scale, cfg->dst_width);
         ph = epi_round_extent(r.h * scale, cfg->dst_height);
     }
-    /* For a tiny region the crop extent can underflow to 0. */
+    /* A guard against rounding: the result must still satisfy the rectangle rule. */
     if (!epi_rect_valid(x, y, w, h, cfg->src_width, cfg->src_height)) {
         return EPI_ERR_INVALID_ARG;
     }

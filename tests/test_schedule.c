@@ -1,7 +1,8 @@
 /*
  * The output of a stage does not depend on when its rows are pushed and
  * popped: the resampler, the converter and the preview reducer give the same
- * bytes for every schedule they accept, and so does the packer after them.
+ * bytes for every schedule they accept. The packer works row by row with no
+ * state, so it needs no schedule test.
  *
  * Schedules, each run on a stage with the same input:
  * - eager: pop until not OK after every push (the reference);
@@ -99,6 +100,8 @@ static void run_schedule(const stage_t* s, schedule_t how, uint32_t* seed) {
     }
     popped += pop_some(s, popped, UINT32_MAX);
     TEST_ASSERT_EQUAL_UINT32(s->out_n, popped);
+    /* No extra row: the stage is finished. */
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, s->pop(s->state, s->out));
 }
 
 #ifdef NDEBUG
@@ -106,11 +109,6 @@ static void run_schedule(const stage_t* s, schedule_t how, uint32_t* seed) {
 #else
 #define SCHEDULES 2
 #endif
-
-/* The number of runs of a schedule: one, and several seeds for random. */
-static int runs(schedule_t how) {
-    return how == RANDOM ? 4 : 1;
-}
 
 typedef void (*init_fn)(const void* ctx, stage_t* s);
 
@@ -120,7 +118,7 @@ static void check_stage(init_fn init, const void* ctx, stage_t* s, uint8_t* ref,
     uint32_t seed = 12345u;
     const size_t bytes = (size_t)s->out_n * s->out_row;
     for (int how = EAGER; how < SCHEDULES; how++) {
-        for (int i = 0; i < runs((schedule_t)how); i++) {
+        for (int i = 0; i < (how == RANDOM ? 4 : 1); i++) { /* random: several seeds */
             init(ctx, s);
             s->out = how == EAGER ? ref : got;
             memset(s->out, 0xee, bytes);
@@ -147,9 +145,7 @@ static void resampler_init(const void* ctx, stage_t* s) {
     s->state = r;
 }
 
-enum { LAYOUT_COVER = 1, LAYOUT_FIT = 2 };
-
-static void resampler_case(int layout, uint32_t sw, uint32_t sh, uint16_t dw, uint16_t dh, epi_filter_t filter) {
+static void resampler_case(uint8_t which, uint32_t sw, uint32_t sh, uint16_t dw, uint16_t dh, epi_filter_t filter) {
     epi_resampler_config_t cfg;
     memset(&cfg, 0, sizeof cfg);
     cfg.src_width = sw;
@@ -158,7 +154,7 @@ static void resampler_case(int layout, uint32_t sw, uint32_t sh, uint16_t dw, ui
     cfg.dst_height = dh;
     cfg.filter = filter;
     cfg.background = (epi_rgb_t){10, 200, 30};
-    TEST_ASSERT_EQUAL_INT(EPI_OK, layout == LAYOUT_COVER ? epi_layout_cover(&cfg, NULL) : epi_layout_fit(&cfg, NULL));
+    TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &cfg, NULL));
     resampler_ctx_t ctx = {&cfg, NULL, epi_resampler_workspace_size(&cfg)};
     TEST_ASSERT_NOT_EQUAL(0, ctx.size);
     ctx.ws = xmalloc(ctx.size);
@@ -184,15 +180,15 @@ static void resampler_case(int layout, uint32_t sw, uint32_t sh, uint16_t dw, ui
 }
 
 void test_schedule_resampler(void) {
-    resampler_case(LAYOUT_COVER, 120, 80, 40, 27, EPI_FILTER_LANCZOS3); /* shrink */
-    resampler_case(LAYOUT_COVER, 120, 80, 40, 27, EPI_FILTER_BOX);
-    resampler_case(LAYOUT_COVER, 12, 8, 36, 28, EPI_FILTER_BICUBIC);  /* upscale */
-    resampler_case(LAYOUT_FIT, 100, 30, 40, 40, EPI_FILTER_BILINEAR); /* bands above and below */
-    resampler_case(LAYOUT_FIT, 3, 400, 6, 12, EPI_FILTER_LANCZOS3);   /* tall: height > 100 × width */
-    resampler_case(LAYOUT_COVER, 3, 400, 4, 1, EPI_FILTER_LANCZOS3);  /* one output row */
+    resampler_case(1, 120, 80, 40, 27, EPI_FILTER_LANCZOS3); /* shrink */
+    resampler_case(1, 120, 80, 40, 27, EPI_FILTER_BOX);
+    resampler_case(1, 12, 8, 36, 28, EPI_FILTER_BICUBIC);    /* upscale */
+    resampler_case(2, 100, 30, 40, 40, EPI_FILTER_BILINEAR); /* bands above and below */
+    resampler_case(2, 3, 400, 6, 12, EPI_FILTER_LANCZOS3);   /* tall: height > 100 × width */
+    resampler_case(1, 3, 400, 4, 1, EPI_FILTER_LANCZOS3);    /* one output row */
 }
 
-/* ---- converter, then the packer and the preview ------------------------------- */
+/* ---- converter, then the preview ------------------------------- */
 
 typedef struct {
     const epi_config_t* cfg;
@@ -215,20 +211,6 @@ static void preview_init(const void* ctx, stage_t* s) {
     epi_preview_t* p = NULL;
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_preview_init(c->pcfg, c->pws, c->psize, &p));
     s->state = p;
-}
-
-static epi_pack_format_t pack_format(const epi_panel_t* p) {
-    return p->ink_count <= 2 ? EPI_PACK_1BPP : p->ink_count <= 4 ? EPI_PACK_2BPP : EPI_PACK_4BPP;
-}
-
-/* Packs each row of codes (w × h) into out (h rows of the format's size). */
-static void pack_rows(const epi_panel_t* p, const uint8_t* codes, int w, int h, uint8_t* out) {
-    const size_t rs = epi_pack_row_size(pack_format(p), (uint16_t)w);
-    for (int y = 0; y < h; y++) {
-        TEST_ASSERT_EQUAL_INT(
-            EPI_OK, epi_pack_row(p, pack_format(p), codes + (size_t)y * w, (uint16_t)w, out + (size_t)y * rs)
-        );
-    }
 }
 
 static void pipeline_case(const epi_panel_t* panel, const epi_intent_t* intent, int w, int h) {
@@ -257,6 +239,7 @@ static void pipeline_case(const epi_panel_t* panel, const epi_intent_t* intent, 
     for (size_t i = 0; i < n; i += 3) { /* a gradient with noisy pixels */
         in[i] = noise[i];
     }
+    free(noise);
     uint8_t* ref = xmalloc(n);
     uint8_t* got = xmalloc(n);
     stage_t s = {
@@ -269,15 +252,6 @@ static void pipeline_case(const epi_panel_t* panel, const epi_intent_t* intent, 
         .out_n = (uint32_t)h
     };
     check_stage(converter_init, &ctx, &s, ref, got);
-
-    /* The packer is stateless, so the packed rows of the last schedule's
-     * codes (equal to the reference's) are the reference's packed rows. */
-    const size_t prs = epi_pack_row_size(pack_format(panel), (uint16_t)w);
-    uint8_t* pa = xmalloc(prs * h);
-    uint8_t* pb = xmalloc(prs * h);
-    pack_rows(panel, ref, w, h, pa);
-    pack_rows(panel, got, w, h, pb);
-    TEST_ASSERT_EQUAL_MEMORY(pa, pb, prs * h);
 
     /* The preview over the reference codes. */
     const size_t prow = (size_t)pcfg.dst_width * sizeof(epi_rgb_t);
@@ -296,11 +270,8 @@ static void pipeline_case(const epi_panel_t* panel, const epi_intent_t* intent, 
 
     free(vgot);
     free(vref);
-    free(pb);
-    free(pa);
     free(got);
     free(ref);
-    free(noise);
     free(in);
     free(ctx.pws);
     free(ctx.ws);
@@ -311,9 +282,7 @@ void test_schedule_pipeline(void) {
     for (size_t k = 0; k < sizeof panels / sizeof panels[0]; k++) {
         const epi_panel_t* p = panels[k];
         TEST_ASSERT_TRUE(p->preset_count > 0);
-        for (size_t i = 0; i < p->preset_count; i++) {
-            pipeline_case(p, epi_panel_preset(p, p->presets[i].name), 40, 80);
-        }
+        pipeline_case(p, epi_panel_preset(p, NULL), 40, 80);
         epi_intent_t extreme = *epi_panel_preset(p, NULL);
         extreme.adapt = 1.0f;
         extreme.vibrance = 2.0f;

@@ -633,13 +633,12 @@ typedef struct {
  * (float), the axis that sets the scale takes the whole region extent
  * exactly, and the other takes dst/scale (at most the region extent),
  * centred within the region: region start + (region extent − size)/2. The
- * placement is the whole output. It does not
- * check the source size limit; the resampler does.
+ * placement is the whole output. It does not check the source size limit;
+ * the resampler does.
  *
  * @return EPI_OK; EPI_ERR_INVALID_ARG, with @p cfg unchanged, for a NULL
  *         @p cfg, a zero size, a region that breaks the rectangle rule
- *         (epi_rect_t), or a result that breaks it (such as a region so
- *         small the crop extent is 0).
+ *         (epi_rect_t), or a result that breaks it.
  */
 epi_err_t epi_layout_cover(epi_resampler_config_t* cfg, const epi_rect_t* region);
 
@@ -654,8 +653,8 @@ epi_err_t epi_layout_cover(epi_resampler_config_t* cfg, const epi_rect_t* region
  * It does not check the source size limit; the resampler does.
  *
  * @return EPI_OK; EPI_ERR_INVALID_ARG, with @p cfg unchanged, for a NULL
- *         @p cfg, a zero size or a region that breaks the rectangle rule
- *         (epi_rect_t).
+ *         @p cfg, a zero size, a region that breaks the rectangle rule
+ *         (epi_rect_t), or a result that breaks it.
  */
 epi_err_t epi_layout_fit(epi_resampler_config_t* cfg, const epi_rect_t* region);
 

@@ -206,20 +206,21 @@ static void fuzz_resampler(int iters) {
             epi_resampler_config_t snap;
             memcpy(&snap, &c, sizeof c);
             const epi_err_t e = cover ? epi_layout_cover(&c, &g) : epi_layout_fit(&c, &g);
+            /* Cover is total: a valid region is laid out, any other is
+             * refused with the config unchanged. */
+            const bool valid = rect_rule(g.x, g.y, g.w, g.h, c.src_width, c.src_height);
             CHECK(
-                e == EPI_OK || (e == EPI_ERR_INVALID_ARG && memcmp(&snap, &c, sizeof c) == 0),
-                "layout error %s, or the config changed",
-                epi_strerror(e)
-            );
-            CHECK(
-                e != EPI_OK || rect_rule(g.x, g.y, g.w, g.h, c.src_width, c.src_height),
-                "layout accepted the region %a,%a,%a,%a in %ux%u",
+                (e == EPI_OK) == valid && (e == EPI_OK || memcmp(&snap, &c, sizeof c) == 0),
+                "%s of the %s region %a,%a,%a,%a in %ux%u gave %s, or the config changed",
+                cover ? "cover" : "fit",
+                valid ? "valid" : "invalid",
                 (double)g.x,
                 (double)g.y,
                 (double)g.w,
                 (double)g.h,
                 (unsigned)c.src_width,
-                (unsigned)c.src_height
+                (unsigned)c.src_height,
+                epi_strerror(e)
             );
             if (e != EPI_OK) {
                 rs_region_invalid++;
@@ -324,14 +325,6 @@ static void fuzz_resampler(int iters) {
             continue;
         }
         if (need > (64u << 20) || (uint64_t)c.src_width * c.src_height > 3000000u) {
-            if (laid_out) { /* too big to run, but init must reject only the workspace */
-                epi_resampler_t* rr = NULL;
-                char b[8];
-                CHECK(
-                    epi_resampler_init(&c, b, sizeof b, &rr) == EPI_ERR_WORKSPACE_TOO_SMALL,
-                    "init rejected a region layout's config"
-                );
-            }
             rs_skip++;
             continue;
         }

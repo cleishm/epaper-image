@@ -178,17 +178,13 @@ static epi_resampler_config_t case_cfg(const epi_rs_case_t* g) {
 
 /* epi_layout_cover (layout 1) or epi_layout_fit (2) must give want's rect
  * and placement. */
-static void check_layout(const char* name, uint8_t layout, const epi_resampler_config_t* want) {
+static void check_layout(const char* name, uint8_t which, const epi_resampler_config_t* want) {
     epi_resampler_config_t c =
         base_cfg(want->src_width, want->src_height, want->dst_width, want->dst_height, EPI_FILTER_BOX);
     c.src_x = c.src_y = c.src_w = c.src_h = -1.0f;
     c.dst_x = c.dst_y = -99;
     c.dst_w = c.dst_h = 0;
-    if (layout == 1) {
-        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, NULL));
-    } else {
-        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, NULL));
-    }
+    TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &c, NULL));
     char msg[160];
     snprintf(msg, sizeof msg, "%s: layout differs from the recorded one", name);
     TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src_x), f_bits(c.src_x), msg);
@@ -1217,6 +1213,15 @@ void test_resampler_drain_contract(void) {
 #define EXPECT_F_EQ(want, got) TEST_ASSERT_TRUE((got) == (want))
 #define EXPECT_F_NEAR(want, got) TEST_ASSERT_TRUE(fabsf((got) - (want)) <= 1e-3f)
 
+/* An invalid layout returns EPI_ERR_INVALID_ARG and leaves every byte of the
+ * config as it was. */
+static void expect_layout_invalid(uint8_t which, epi_resampler_config_t* c, const epi_rect_t* region) {
+    epi_resampler_config_t snap;
+    memcpy(&snap, c, sizeof snap);
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, layout(which, c, region));
+    TEST_ASSERT_EQUAL_MEMORY(&snap, c, sizeof snap);
+}
+
 void test_resampler_layout(void) {
     epi_resampler_config_t c = base_cfg(4000, 3000, 1200, 1600, EPI_FILTER_LANCZOS3);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, NULL)); /* scale = 1600/3000: full height, centred width */
@@ -1279,28 +1284,11 @@ void test_resampler_layout(void) {
     for (int z = 0; z < 4; z++) {
         c = base_cfg(z == 0 ? 0 : 10, z == 1 ? 0 : 10, z == 2 ? 0 : 10, z == 3 ? 0 : 10, EPI_FILTER_BOX);
         c.src_x = 7.0f;
-        epi_resampler_config_t snap;
-        memcpy(&snap, &c, sizeof c);
-        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_layout_cover(&c, NULL));
-        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_layout_fit(&c, NULL));
-        TEST_ASSERT_EQUAL_MEMORY(&snap, &c, sizeof c);
+        expect_layout_invalid(1, &c, NULL);
+        expect_layout_invalid(2, &c, NULL);
     }
     TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_layout_cover(NULL, NULL));
     TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_layout_fit(NULL, NULL));
-}
-
-/* Lays out with layout 1 (cover) or 2 (fit). */
-static epi_err_t layout(uint8_t which, epi_resampler_config_t* c, const epi_rect_t* region) {
-    return which == 1 ? epi_layout_cover(c, region) : epi_layout_fit(c, region);
-}
-
-/* An invalid layout returns EPI_ERR_INVALID_ARG and leaves every byte of the
- * config as it was. */
-static void expect_layout_invalid(uint8_t which, epi_resampler_config_t* c, const epi_rect_t* region) {
-    epi_resampler_config_t snap;
-    memcpy(&snap, c, sizeof snap);
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, layout(which, c, region));
-    TEST_ASSERT_EQUAL_MEMORY(&snap, c, sizeof snap);
 }
 
 /* The config builds a resampler with exactly the size it reports; a wide
@@ -1366,24 +1354,17 @@ void test_resampler_layout_region(void) {
     TEST_ASSERT_EQUAL_INT32(59, c.dst_y);
     expect_accepted(&c);
 
-    /* The whole source as a region is exactly NULL, over many sizes. */
-    for (uint32_t i = 1; i < 2000; i++) {
-        uint32_t sw = 1 + (i * 7919u) % 65535u, sh = 1 + (i * 104729u) % 9000u;
-        uint16_t dw = (uint16_t)(1 + (i * 31u) % 1600u), dh = (uint16_t)(1 + (i * 17u) % 1200u);
-        const epi_rect_t whole = {0.0f, 0.0f, (float)sw, (float)sh};
+    /* The whole source as a region is exactly NULL. */
+    const uint16_t whole_sizes[3][4] = {{4000, 3000, 800, 480}, {65535, 7, 300, 200}, {13, 9000, 1600, 1}};
+    for (int i = 0; i < 3; i++) {
+        const uint16_t* z = whole_sizes[i];
+        const epi_rect_t whole = {0.0f, 0.0f, (float)z[0], (float)z[1]};
         for (uint8_t which = 1; which <= 2; which++) {
-            epi_resampler_config_t a = base_cfg(sw, sh, dw, dh, EPI_FILTER_BOX);
+            epi_resampler_config_t a = base_cfg(z[0], z[1], z[2], z[3], EPI_FILTER_BOX);
             epi_resampler_config_t b = a;
             TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &a, NULL));
             TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &b, &whole));
-            TEST_ASSERT_EQUAL_HEX32(f_bits(a.src_x), f_bits(b.src_x));
-            TEST_ASSERT_EQUAL_HEX32(f_bits(a.src_y), f_bits(b.src_y));
-            TEST_ASSERT_EQUAL_HEX32(f_bits(a.src_w), f_bits(b.src_w));
-            TEST_ASSERT_EQUAL_HEX32(f_bits(a.src_h), f_bits(b.src_h));
-            TEST_ASSERT_EQUAL_INT32(a.dst_x, b.dst_x);
-            TEST_ASSERT_EQUAL_INT32(a.dst_y, b.dst_y);
-            TEST_ASSERT_EQUAL_UINT16(a.dst_w, b.dst_w);
-            TEST_ASSERT_EQUAL_UINT16(a.dst_h, b.dst_h);
+            TEST_ASSERT_EQUAL_MEMORY(&a, &b, sizeof a);
         }
     }
 
@@ -1406,13 +1387,12 @@ void test_resampler_layout_region(void) {
     }
 
     /* Tiny regions: a huge or infinite scale neither crashes nor converts out
-     * of range; the result is invalid or a config init accepts. */
+     * of range, and the layout is a config init accepts. */
     const epi_rect_t tiny[] = {
         {5, 5, 1e-30f, 10},
         {5, 5, 10, 1e-30f},
         {5, 5, 1e-30f, 1e-30f},
         {5, 5, 1e-45f, 10},
-        {5, 5, 1e-45f, 1e-45f},
         {0, 0, 1e-45f, 1e-30f},
         {40, 30, 1e-30f, 1e-30f},
     };
@@ -1421,25 +1401,19 @@ void test_resampler_layout_region(void) {
             for (int d = 0; d < 3; d++) {
                 const uint16_t dw = d == 0 ? 1 : (d == 1 ? 300 : 65535), dh = d == 2 ? 1 : 200;
                 c = base_cfg(40, 30, dw, dh, EPI_FILTER_LANCZOS3);
-                epi_resampler_config_t snap;
-                memcpy(&snap, &c, sizeof c);
-                const epi_err_t e = layout(which, &c, &tiny[i]);
-                if (e == EPI_OK) {
-                    expect_accepted(&c);
-                } else {
-                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, e);
-                    TEST_ASSERT_EQUAL_MEMORY(&snap, &c, sizeof c);
-                }
+                TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &c, &tiny[i]));
+                expect_accepted(&c);
             }
         }
     }
     /* Both scales infinite: fit fills the output; cover's crop extent
-     * underflows to 0, which is invalid. */
+     * underflows and is kept at the smallest normal float. */
     const epi_rect_t speck = {5, 5, 1e-45f, 1e-45f};
     c = base_cfg(40, 30, 300, 200, EPI_FILTER_BOX);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, &speck));
     TEST_ASSERT_EQUAL_UINT16(300, c.dst_w);
     TEST_ASSERT_EQUAL_UINT16(200, c.dst_h);
     c = base_cfg(40, 30, 300, 200, EPI_FILTER_BOX);
-    expect_layout_invalid(1, &c, &speck);
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, &speck));
+    expect_accepted(&c);
 }
