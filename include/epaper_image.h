@@ -6,6 +6,12 @@
  * adjustment, dynamic-range compression, palette matching and error
  * diffusion to panel ink codes. Rows of ink codes are then reduced to a
  * preview, packed for the panel, or both.
+ *
+ * Each push or pop does one row's work: a row and its filter windows (a
+ * resampler pop's vertical window grows with the vertical shrink ratio). So
+ * a frame can be rendered in steps: pause between any two calls,
+ * or abandon a render by not calling again. The output depends only on the
+ * configurations and the input rows, not on where the caller pauses.
  */
 
 #ifndef EPAPER_IMAGE_H

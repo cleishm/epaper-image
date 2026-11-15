@@ -1338,6 +1338,41 @@ The library does not automatically pick a cheaper filter or pre-shrink for
 untrusted images, because that would silently change output and add a second
 path.
 
+### Rendering in steps
+
+Each push and pop does a bounded amount of work, so a caller can render a
+frame in slices, a few rows at a time, and yield to a UI or check for
+cancellation between any two calls:
+
+- A converter push computes L\*src and one horizontal blur pass for its row.
+  A pop does one vertical blur pass and the intent and ditherer for one row:
+  a fixed amount per pixel, as the hull test, the cusp search and the
+  nearest-ink search are bounded loops.
+- A resampler push does one horizontal pass. A pop convolves one output
+  row's vertical window: the visible width times the vertical taps, which
+  grow with the vertical shrink ratio and the filter's support (at
+  dst_height 1 the window is the whole source rectangle's height).
+- The preview reducer and the packer work on one row per call.
+
+No call makes a pass over the image beyond those windows, and no stage adapts
+to the rows it has seen: the intent's adaptation is per pixel. Init work depends on the
+configuration, not on pixels. The one costly init, `epi_colour_panel_init`,
+depends on the inks rather than the image, reports progress and can be
+cancelled. Calls are bounded, but a push and the pops it releases need not
+be: background rows above the placement are ready before any push, and the
+converter's last push releases its last r + 1 rows. A caller that slices by
+time therefore counts pops, not pushes.
+
+The output depends only on the configurations and the input rows in order,
+not on how the calls are scheduled. The rings are indexed by row number, so a
+slot holds the same data whenever it is read; the ditherer's error rows move
+only in pop, one row per call, top to bottom; the resampler's vertical
+weights depend only on the output row. Pausing between any two calls changes
+nothing, and neither does popping later than the push contract asks, as long
+as no push is refused. A refused push writes nothing and does not advance the
+row count. There is no cancel call: a caller abandons a render by not calling
+again, and starts another by initialising over the same workspace.
+
 ### Output formats
 
 Each converter row is W bytes, one ink code per pixel, mapped from the row of ink
