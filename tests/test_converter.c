@@ -921,10 +921,37 @@ static const uint64_t undithered_goldens[3][4] = {
      UINT64_C(0xfbb28d6ebfa10d79)},
 };
 
+/* FNV-1a 64 of all undithered rows in order, hashed a row at a time so only one
+ * row of output is held (the ESP32's largest free block takes the image alone). */
+static uint64_t undithered_hash(const epi_config_t* cfg, const epi_rgb_t* img) {
+    size_t size = epi_converter_workspace_size(cfg);
+    TEST_ASSERT_NOT_EQUAL(0, size);
+    void* ws = xmalloc(size);
+    epi_rgb_t* row = xmalloc(cfg->width * sizeof *row);
+    epi_converter_t* c = NULL;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
+    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    int n = 0;
+    for (int y = 0; y < cfg->height; y++) {
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * cfg->width));
+        while (epi_converter_pop_undithered(c, row) == EPI_OK) {
+            const uint8_t* p = (const uint8_t*)row;
+            for (size_t i = 0; i < cfg->width * sizeof *row; i++) {
+                h ^= p[i];
+                h *= UINT64_C(0x100000001b3);
+            }
+            n++;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(cfg->height, n);
+    free(row);
+    free(ws);
+    return h;
+}
+
 void test_converter_undithered_goldens(void) {
     const size_t n = (size_t)GOLDEN_W * GOLDEN_H;
     epi_rgb_t* img = xmalloc(n * sizeof *img);
-    epi_rgb_t* out = xmalloc(n * sizeof *out);
     char report[1024];
     size_t len = 0;
     int bad = 0;
@@ -946,15 +973,13 @@ void test_converter_undithered_goldens(void) {
                 break;
             }
             epi_config_t cfg = config(builtin_panels[k], GOLDEN_W, GOLDEN_H);
-            TEST_ASSERT_EQUAL_INT(GOLDEN_H, run_undithered(&cfg, img, out));
-            uint64_t hsh = fnv1a64((const uint8_t*)out, n * sizeof *out);
+            uint64_t hsh = undithered_hash(&cfg, img);
             bad |= hsh != undithered_goldens[k][i];
             len += (size_t)snprintf(
                 report + len, sizeof report - len, "UINT64_C(0x%016llx)%s", (unsigned long long)hsh, i < 3 ? ", " : "},"
             );
         }
     }
-    free(out);
     free(img);
     if (bad) {
         printf("undithered golden hashes, got:%s\n", report);
