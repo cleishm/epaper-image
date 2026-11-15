@@ -223,6 +223,16 @@ static int epi_source_too_large(const epi_resampler_config_t* cfg) {
         (uint64_t)cfg->src_width * cfg->src_height > limit;
 }
 
+/* The source rectangle rule (epi_resampler_config_t): finite, x, y ≥ 0,
+ * w, h > 0 and the far corner within the source, summed in float. */
+static int epi_rect_valid(float x, float y, float w, float h, uint32_t src_width, uint32_t src_height) {
+    /* False for NaN and −inf; +inf anywhere fails the far-corner test below. */
+    if (!(w > 0.0f) || !(h > 0.0f) || !(x >= 0.0f) || !(y >= 0.0f)) {
+        return 0;
+    }
+    return x + w <= (float)src_width && y + h <= (float)src_height;
+}
+
 static epi_err_t epi_plan(const epi_resampler_config_t* cfg, epi_rs_plan_t* p) {
     if (cfg == NULL || cfg->src_width == 0 || cfg->src_height == 0) {
         return EPI_ERR_INVALID_ARG;
@@ -234,16 +244,12 @@ static epi_err_t epi_plan(const epi_resampler_config_t* cfg, epi_rs_plan_t* p) {
         (unsigned)cfg->filter > (unsigned)EPI_FILTER_LANCZOS3) {
         return EPI_ERR_INVALID_ARG;
     }
-    const float x0 = cfg->src_x, y0 = cfg->src_y;
-    /* False for NaN and −inf; +inf anywhere fails the far-corner test below. */
-    if (!(cfg->src_w > 0.0f) || !(cfg->src_h > 0.0f) || !(x0 >= 0.0f) || !(y0 >= 0.0f)) {
+    if (!epi_rect_valid(cfg->src_x, cfg->src_y, cfg->src_w, cfg->src_h, cfg->src_width, cfg->src_height)) {
         return EPI_ERR_INVALID_ARG;
     }
+    const float x0 = cfg->src_x, y0 = cfg->src_y;
     const float x1 = x0 + cfg->src_w; /* the rect's far corner (x1, y1) */
     const float y1 = y0 + cfg->src_h;
-    if (x1 > (float)cfg->src_width || y1 > (float)cfg->src_height) {
-        return EPI_ERR_INVALID_ARG;
-    }
 
     memset(p, 0, sizeof *p);
     p->filter = (uint8_t)cfg->filter;
@@ -592,57 +598,78 @@ epi_err_t epi_resampler_pop(epi_resampler_t* r, epi_rgb_t* dst_row) {
 
 /* ---- Layout helpers ------------------------------------------------------- */
 
-/* Round half away from zero for v ≥ 0 (exact: v − trunc(v) is exact). */
-static uint32_t epi_round_pos_f(float v) {
+/* Round half away from zero for v ≥ 0 (exact: v − trunc(v) is exact), kept in
+ * [1, max]. A value at or over max, +inf included, is max without being
+ * converted, so a huge scale is not an out-of-range conversion. */
+static uint32_t epi_round_extent(float v, uint16_t max) {
+    if (!(v < (float)max)) {
+        return max;
+    }
     uint32_t t = (uint32_t)v;
-    return (v - (float)t >= 0.5f) ? t + 1u : t;
+    t = (v - (float)t >= 0.5f) ? t + 1u : t;
+    return t < 1u ? 1u : (t > max ? max : t);
 }
 
-/* A source side cropped to extent len (at most the side), centred. */
-static void epi_crop_axis(float side, float len, float* pos, float* size) {
+/* A region side [start, start + side) cropped to extent len (at most the
+ * side), centred within it. */
+static void epi_crop_axis(float start, float side, float len, float* pos, float* size) {
     *size = len > side ? side : len;
-    *pos = (side - *size) * 0.5f;
+    *pos = start + (side - *size) * 0.5f;
 }
 
-void epi_layout_cover(epi_resampler_config_t* cfg) {
+/* Cover (cover != 0) or fit of the region, NULL for the whole source. Works in
+ * locals and writes cfg only once the result passes the rectangle rule. */
+static epi_err_t epi_layout(epi_resampler_config_t* cfg, const epi_rect_t* region, int cover) {
     if (cfg == NULL || cfg->src_width == 0 || cfg->src_height == 0 || cfg->dst_width == 0 || cfg->dst_height == 0) {
-        return;
+        return EPI_ERR_INVALID_ARG;
     }
     const float sw = (float)cfg->src_width, sh = (float)cfg->src_height;
-    const float dw = (float)cfg->dst_width, dh = (float)cfg->dst_height;
-    const float sx = dw / sw, sy = dh / sh;
-    if (sx >= sy) { /* width fills: the whole source width, centred rows */
-        cfg->src_x = 0.0f;
-        cfg->src_w = sw;
-        epi_crop_axis(sh, dh / sx, &cfg->src_y, &cfg->src_h);
+    epi_rect_t r;
+    if (region != NULL) {
+        r = *region;
     } else {
-        cfg->src_y = 0.0f;
-        cfg->src_h = sh;
-        epi_crop_axis(sw, dw / sy, &cfg->src_x, &cfg->src_w);
+        r.x = 0.0f;
+        r.y = 0.0f;
+        r.w = sw;
+        r.h = sh;
     }
-    cfg->dst_x = 0;
-    cfg->dst_y = 0;
-    cfg->dst_w = cfg->dst_width;
-    cfg->dst_h = cfg->dst_height;
+    if (!epi_rect_valid(r.x, r.y, r.w, r.h, cfg->src_width, cfg->src_height)) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    const float dw = (float)cfg->dst_width, dh = (float)cfg->dst_height;
+    const float sx = dw / r.w, sy = dh / r.h;
+    float x = r.x, y = r.y, w = r.w, h = r.h;
+    uint32_t pw = cfg->dst_width, ph = cfg->dst_height;
+    if (cover) {
+        if (sx >= sy) { /* width fills: the whole region width, centred rows */
+            epi_crop_axis(r.y, r.h, dh / sx, &y, &h);
+        } else {
+            epi_crop_axis(r.x, r.w, dw / sy, &x, &w);
+        }
+    } else {
+        const float scale = sx <= sy ? sx : sy;
+        pw = epi_round_extent(r.w * scale, cfg->dst_width);
+        ph = epi_round_extent(r.h * scale, cfg->dst_height);
+    }
+    /* For a tiny region the crop extent can underflow to 0. */
+    if (!epi_rect_valid(x, y, w, h, cfg->src_width, cfg->src_height)) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    cfg->src_x = x;
+    cfg->src_y = y;
+    cfg->src_w = w;
+    cfg->src_h = h;
+    cfg->dst_w = (uint16_t)pw;
+    cfg->dst_h = (uint16_t)ph;
+    cfg->dst_x = (int32_t)((cfg->dst_width - pw) / 2u);
+    cfg->dst_y = (int32_t)((cfg->dst_height - ph) / 2u);
+    return EPI_OK;
 }
 
-void epi_layout_fit(epi_resampler_config_t* cfg) {
-    if (cfg == NULL || cfg->src_width == 0 || cfg->src_height == 0 || cfg->dst_width == 0 || cfg->dst_height == 0) {
-        return;
-    }
-    const float sw = (float)cfg->src_width, sh = (float)cfg->src_height;
-    const float sx = (float)cfg->dst_width / sw, sy = (float)cfg->dst_height / sh;
-    const float scale = sx <= sy ? sx : sy;
-    uint32_t w = epi_round_pos_f(sw * scale);
-    uint32_t h = epi_round_pos_f(sh * scale);
-    w = w < 1u ? 1u : (w > cfg->dst_width ? cfg->dst_width : w);
-    h = h < 1u ? 1u : (h > cfg->dst_height ? cfg->dst_height : h);
-    cfg->src_x = 0.0f;
-    cfg->src_y = 0.0f;
-    cfg->src_w = sw;
-    cfg->src_h = sh;
-    cfg->dst_w = (uint16_t)w;
-    cfg->dst_h = (uint16_t)h;
-    cfg->dst_x = (int32_t)((cfg->dst_width - w) / 2u);
-    cfg->dst_y = (int32_t)((cfg->dst_height - h) / 2u);
+epi_err_t epi_layout_cover(epi_resampler_config_t* cfg, const epi_rect_t* region) {
+    return epi_layout(cfg, region, 1);
+}
+
+epi_err_t epi_layout_fit(epi_resampler_config_t* cfg, const epi_rect_t* region) {
+    return epi_layout(cfg, region, 0);
 }

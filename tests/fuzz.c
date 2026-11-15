@@ -5,7 +5,10 @@
  * configurations (degenerate and edge-hugging source rectangles, extreme
  * placements, random grey panels, 1x1 up to 65535-wide sources), with every
  * buffer allocated at exactly the size the API reports so AddressSanitizer
- * sees any overrun. A separate pass checks the source size limit with sizes
+ * sees any overrun. Cover and fit lay out random regions too, valid,
+ * degenerate and invalid: a region that breaks the rectangle rule must be
+ * rejected with the config unchanged, and any other result must be a config
+ * init accepts. A separate pass checks the source size limit with sizes
  * and limits at and beyond its edges. Each pipeline must emit exactly as many
  * rows as its configuration promises. The preview reducer and the row packer
  * run the same way on random sizes and codes, including codes they must reject.
@@ -90,10 +93,86 @@ static int32_t rplace(int32_t cur, uint32_t len, uint32_t canvas) {
     }
 }
 
+/* The float just above v, for finite v ≥ 0 (no libm). */
+static float rf_above(float v) {
+    uint32_t b;
+    memcpy(&b, &v, sizeof b);
+    b++;
+    memcpy(&v, &b, sizeof v);
+    return v;
+}
+
+/* The source rectangle rule (epi_resampler_config_t), restated as the oracle. */
+static bool rect_rule(float x, float y, float w, float h, uint32_t sw, uint32_t sh) {
+    return isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && x >= 0.0f && y >= 0.0f && w > 0.0f && h > 0.0f &&
+        x + w <= (float)sw && y + h <= (float)sh;
+}
+
+/* One axis of a layout region within a side: often valid, often degenerate,
+ * sometimes breaking the rule. */
+static void raxis(uint32_t side, float* pos, float* len) {
+    const float s = (float)side;
+    switch (ru(12)) {
+    case 0: /* the whole side */
+        *pos = 0.0f;
+        *len = s;
+        break;
+    case 1:
+    case 9:
+    case 10: /* arbitrary, inside */
+        *pos = rf01() * s;
+        *len = rf01() * (s - *pos);
+        break;
+    case 2:
+    case 11: { /* hugging the far edge at a fractional origin */
+        static const float f[] = {0.001f, 0.25f, 0.5f, 0.999f, 1.5f, 17.375f};
+        *len = ru(3) ? f[ru(sizeof f / sizeof f[0])] : rf01() * s;
+        *len = *len > s ? s : *len;
+        *pos = s - *len;
+        break;
+    }
+    case 3: { /* tiny, anywhere including the far edge */
+        static const float t[] = {1e-30f, FLT_MIN, FLT_MIN / 3.0f, 1e-45f, 1e-38f};
+        *pos = ru(2) ? s : rf01() * s;
+        *len = t[ru(sizeof t / sizeof t[0])];
+        break;
+    }
+    case 4: /* integer crop */
+        *len = (float)(1 + ru(side));
+        *pos = (float)ru(side - (uint32_t)*len + 1u);
+        break;
+    case 5: /* one float past the far edge */
+        *pos = ru(2) ? 0.0f : rf01() * s;
+        *len = rf_above(s - *pos);
+        break;
+    case 6: { /* not finite */
+        static const float nf[] = {NAN, INFINITY, -INFINITY};
+        if (ru(2)) {
+            *pos = nf[ru(3)];
+            *len = 1.0f;
+        } else {
+            *pos = 0.0f;
+            *len = nf[ru(3)];
+        }
+        break;
+    }
+    case 7: /* zero or negative */
+        *pos = ru(2) ? -rf01() - FLT_MIN : 0.0f;
+        *len = ru(3) == 0 ? -0.0f : (ru(2) ? 0.0f : -rf01());
+        break;
+    default: /* huge */
+        *pos = 0.0f;
+        *len = ru(2) ? FLT_MAX : 2.0f * s;
+        break;
+    }
+}
+
 static long rs_ok;
 static long rs_invalid;
 static long rs_skip;
 static long rs_rows;
+static long rs_region;
+static long rs_region_invalid;
 
 static void fuzz_resampler(int iters) {
     for (int it = 0; it < iters; it++) {
@@ -110,13 +189,62 @@ static void fuzz_resampler(int iters) {
         c.filter = (epi_filter_t)ru(4);
         c.max_src_pixels = ru(8) ? UINT32_MAX : 0; /* mostly lifted, to keep the size coverage */
         c.background = (epi_rgb_t){(uint8_t)rnd(), (uint8_t)rnd(), (uint8_t)rnd()};
-        switch (ru(8)) {
+        bool laid_out = false; /* by a region layout, which must give a config init accepts */
+        switch (ru(10)) {
         case 0:
-            epi_layout_cover(&c);
+            CHECK(epi_layout_cover(&c, NULL) == EPI_OK, "cover of the whole source failed");
             break;
         case 1:
-            epi_layout_fit(&c);
+            CHECK(epi_layout_fit(&c, NULL) == EPI_OK, "fit of the whole source failed");
             break;
+        case 8:
+        case 9: { /* cover or fit of a random region */
+            epi_rect_t g;
+            raxis(c.src_width, &g.x, &g.w);
+            raxis(c.src_height, &g.y, &g.h);
+            const bool cover = ru(2) != 0;
+            epi_resampler_config_t snap;
+            memcpy(&snap, &c, sizeof c);
+            const epi_err_t e = cover ? epi_layout_cover(&c, &g) : epi_layout_fit(&c, &g);
+            CHECK(
+                e == EPI_OK || (e == EPI_ERR_INVALID_ARG && memcmp(&snap, &c, sizeof c) == 0),
+                "layout error %s, or the config changed",
+                epi_strerror(e)
+            );
+            CHECK(
+                e != EPI_OK || rect_rule(g.x, g.y, g.w, g.h, c.src_width, c.src_height),
+                "layout accepted the region %a,%a,%a,%a in %ux%u",
+                (double)g.x,
+                (double)g.y,
+                (double)g.w,
+                (double)g.h,
+                (unsigned)c.src_width,
+                (unsigned)c.src_height
+            );
+            if (e != EPI_OK) {
+                rs_region_invalid++;
+                continue;
+            }
+            CHECK(
+                rect_rule(c.src_x, c.src_y, c.src_w, c.src_h, c.src_width, c.src_height),
+                "%s of region %a,%a,%a,%a in %ux%u gave the rect %a,%a,%a,%a",
+                cover ? "cover" : "fit",
+                (double)g.x,
+                (double)g.y,
+                (double)g.w,
+                (double)g.h,
+                (unsigned)c.src_width,
+                (unsigned)c.src_height,
+                (double)c.src_x,
+                (double)c.src_y,
+                (double)c.src_w,
+                (double)c.src_h
+            );
+            const uint32_t limit = c.max_src_pixels ? c.max_src_pixels : EPI_DEFAULT_MAX_SRC_PIXELS;
+            laid_out = (uint64_t)c.src_width * c.src_height <= limit;
+            rs_region++;
+            break;
+        }
         case 2: { /* integer crop the size of the output */
             uint16_t w = (uint16_t)(1 + ru(c.src_width));
             uint16_t h = (uint16_t)(1 + ru(c.src_height));
@@ -167,11 +295,26 @@ static void fuzz_resampler(int iters) {
             break;
         }
         }
-        c.dst_x = rplace(c.dst_x, c.dst_w, c.dst_width);
-        c.dst_y = rplace(c.dst_y, c.dst_h, c.dst_height);
+        if (!laid_out) { /* a region layout keeps its own placement */
+            c.dst_x = rplace(c.dst_x, c.dst_w, c.dst_width);
+            c.dst_y = rplace(c.dst_y, c.dst_h, c.dst_height);
+        }
 
         size_t need = epi_resampler_workspace_size(&c);
         if (need == 0) {
+            CHECK(
+                !laid_out,
+                "region layout gave a config with workspace size 0 (src=%ux%u dst=%ux%u rect=%a,%a,%a,%a filter=%d)",
+                (unsigned)c.src_width,
+                (unsigned)c.src_height,
+                (unsigned)c.dst_width,
+                (unsigned)c.dst_height,
+                (double)c.src_x,
+                (double)c.src_y,
+                (double)c.src_w,
+                (double)c.src_h,
+                (int)c.filter
+            );
             epi_resampler_t* rr = NULL;
             char b[8];
             CHECK(
@@ -181,6 +324,14 @@ static void fuzz_resampler(int iters) {
             continue;
         }
         if (need > (64u << 20) || (uint64_t)c.src_width * c.src_height > 3000000u) {
+            if (laid_out) { /* too big to run, but init must reject only the workspace */
+                epi_resampler_t* rr = NULL;
+                char b[8];
+                CHECK(
+                    epi_resampler_init(&c, b, sizeof b, &rr) == EPI_ERR_WORKSPACE_TOO_SMALL,
+                    "init rejected a region layout's config"
+                );
+            }
             rs_skip++;
             continue;
         }
@@ -235,7 +386,15 @@ static void fuzz_resampler(int iters) {
         free(raw);
         rs_ok++;
     }
-    printf("resampler: ok=%ld invalid=%ld skipped=%ld rows=%ld\n", rs_ok, rs_invalid, rs_skip, rs_rows);
+    printf(
+        "resampler: ok=%ld invalid=%ld skipped=%ld rows=%ld region=%ld region-invalid=%ld\n",
+        rs_ok,
+        rs_invalid,
+        rs_skip,
+        rs_rows,
+        rs_region,
+        rs_region_invalid
+    );
 }
 
 static uint64_t seed_arg; /* the seed given on the command line, for failure messages */
@@ -294,11 +453,17 @@ static void fuzz_limits(int iters) {
             c.max_src_pixels = UINT32_MAX;
             break;
         }
-        if (ru(2)) {
-            epi_layout_cover(&c);
-        } else {
-            epi_layout_fit(&c);
-        }
+        /* Defined for any size but zero: the resampler checks the limit. */
+        const epi_err_t le = ru(2) ? epi_layout_cover(&c, NULL) : epi_layout_fit(&c, NULL);
+        CHECK(
+            (le == EPI_OK) == (c.src_width != 0 && c.src_height != 0),
+            "layout of %ux%u: %s [seed=%llu iteration=%d]",
+            (unsigned)c.src_width,
+            (unsigned)c.src_height,
+            epi_strerror(le),
+            (unsigned long long)seed_arg,
+            it
+        );
         const uint32_t limit = c.max_src_pixels ? c.max_src_pixels : EPI_DEFAULT_MAX_SRC_PIXELS;
         const size_t need = epi_resampler_workspace_size(&c);
         uint64_t dummy[2];

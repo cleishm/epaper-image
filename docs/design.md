@@ -1040,15 +1040,28 @@ convolves.
 ### Layout helpers
 
 `epi_layout_cover` and `epi_layout_fit` fill the rectangles for the two
-common layouts, in float. **Cover** fills the output and centre-crops: with
-scale = max(dst_width/src_width, dst_height/src_height), the axis that sets
-the scale takes the whole source extent and the other takes dst/scale (at
-most the source extent), centred at (src − size)/2; the placement is the
-whole output. **Fit** fits inside the output on the background: with
-scale = min(dst_width/src_width, dst_height/src_height), the rectangle is
-the whole source, dst_w = round(src_width·scale) (half away from zero, kept
+common layouts, in float. Each lays out a region of the source, an
+`epi_rect_t` in source pixels, such as the framing a user chose; NULL is the
+whole source. A layout works on the region's extents, region.w and region.h,
+and adds its origin to the source position, so a whole-source region gives
+exactly what NULL gives. **Cover** fills the output and centre-crops: with
+scale = max(dst_width/region.w, dst_height/region.h), the axis that sets
+the scale takes the whole region extent and the other takes dst/scale (at
+most the region extent), centred within the region at
+start + (extent − size)/2; the placement is the whole output. **Fit** fits
+inside the output on the background: with
+scale = min(dst_width/region.w, dst_height/region.h), the rectangle is
+the region, dst_w = round(region.w·scale) (half away from zero, kept
 in [1, dst_width]) and likewise dst_h, centred at
 ⌊(dst_width − dst_w)/2⌋ and ⌊(dst_height − dst_h)/2⌋.
+
+The region follows the same rule as the resampler's source rectangle, and so
+must the result, since the layout's output is meant to go straight to init.
+Two cases need care. A tiny region makes the fit scale huge or infinite, so an
+extent at or over the output size is taken as the output size without
+converting it to an integer. And a tiny region can make the cover crop extent
+underflow to 0. A layout that cannot give a valid rectangle returns
+`EPI_ERR_INVALID_ARG` and leaves the config unchanged.
 
 ## Fixed-point arithmetic and determinism
 
