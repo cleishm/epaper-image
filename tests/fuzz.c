@@ -103,9 +103,9 @@ static float rf_above(float v) {
 }
 
 /* The source rectangle rule (epi_resampler_config_t), restated as the oracle. */
-static bool rect_rule(float x, float y, float w, float h, uint32_t sw, uint32_t sh) {
-    return isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && x >= 0.0f && y >= 0.0f && w > 0.0f && h > 0.0f &&
-        x + w <= (float)sw && y + h <= (float)sh;
+static bool rect_rule(epi_rect_t r, uint32_t sw, uint32_t sh) {
+    return isfinite(r.x) && isfinite(r.y) && isfinite(r.w) && isfinite(r.h) && r.x >= 0.0f && r.y >= 0.0f &&
+        r.w > 0.0f && r.h > 0.0f && r.x + r.w <= (float)sw && r.y + r.h <= (float)sh;
 }
 
 /* One axis of a layout region within a side: often valid, often degenerate,
@@ -208,7 +208,7 @@ static void fuzz_resampler(int iters) {
             const epi_err_t e = cover ? epi_layout_cover(&c, &g) : epi_layout_fit(&c, &g);
             /* Cover is total: a valid region is laid out, any other is
              * refused with the config unchanged. */
-            const bool valid = rect_rule(g.x, g.y, g.w, g.h, c.src_width, c.src_height);
+            const bool valid = rect_rule(g, c.src_width, c.src_height);
             CHECK(
                 (e == EPI_OK) == valid && (e == EPI_OK || memcmp(&snap, &c, sizeof c) == 0),
                 "%s of the %s region %a,%a,%a,%a in %ux%u gave %s, or the config changed",
@@ -227,7 +227,7 @@ static void fuzz_resampler(int iters) {
                 continue;
             }
             CHECK(
-                rect_rule(c.src_x, c.src_y, c.src_w, c.src_h, c.src_width, c.src_height),
+                rect_rule(c.src, c.src_width, c.src_height),
                 "%s of region %a,%a,%a,%a in %ux%u gave the rect %a,%a,%a,%a",
                 cover ? "cover" : "fit",
                 (double)g.x,
@@ -236,10 +236,10 @@ static void fuzz_resampler(int iters) {
                 (double)g.h,
                 (unsigned)c.src_width,
                 (unsigned)c.src_height,
-                (double)c.src_x,
-                (double)c.src_y,
-                (double)c.src_w,
-                (double)c.src_h
+                (double)c.src.x,
+                (double)c.src.y,
+                (double)c.src.w,
+                (double)c.src.h
             );
             const uint32_t limit = c.max_src_pixels ? c.max_src_pixels : EPI_DEFAULT_MAX_SRC_PIXELS;
             laid_out = (uint64_t)c.src_width * c.src_height <= limit;
@@ -251,46 +251,46 @@ static void fuzz_resampler(int iters) {
             uint16_t h = (uint16_t)(1 + ru(c.src_height));
             c.dst_w = w;
             c.dst_h = h;
-            c.src_x = (float)ru(c.src_width - w + 1u);
-            c.src_y = (float)ru(c.src_height - h + 1u);
-            c.src_w = w;
-            c.src_h = h;
+            c.src.x = (float)ru(c.src_width - w + 1u);
+            c.src.y = (float)ru(c.src_height - h + 1u);
+            c.src.w = w;
+            c.src.h = h;
             break;
         }
         case 3: /* collapsed: x0 + w == x0, including right at the far edge */
-            c.src_x = ru(2) ? (float)c.src_width : (float)ru(c.src_width);
-            c.src_y = ru(2) ? (float)c.src_height : (float)ru(c.src_height);
-            c.src_w = ru(2) ? FLT_MIN : 1e-30f;
-            c.src_h = ru(2) ? FLT_MIN : 1e-30f;
+            c.src.x = ru(2) ? (float)c.src_width : (float)ru(c.src_width);
+            c.src.y = ru(2) ? (float)c.src_height : (float)ru(c.src_height);
+            c.src.w = ru(2) ? FLT_MIN : 1e-30f;
+            c.src.h = ru(2) ? FLT_MIN : 1e-30f;
             c.dst_w = (uint16_t)(1 + ru(300));
             c.dst_h = (uint16_t)(1 + ru(300));
             break;
         case 4: { /* hugging the far edge */
             float wf = ru(2) ? 0.001f : 0.5f;
             float hf = ru(2) ? 0.001f : 0.5f;
-            c.src_w = wf;
-            c.src_h = hf;
-            c.src_x = (float)c.src_width - wf;
-            c.src_y = (float)c.src_height - hf;
+            c.src.w = wf;
+            c.src.h = hf;
+            c.src.x = (float)c.src_width - wf;
+            c.src.y = (float)c.src_height - hf;
             c.dst_w = (uint16_t)(1 + ru(400));
             c.dst_h = (uint16_t)(1 + ru(400));
             break;
         }
         case 5: /* tiny x0, huge extent: x1 - x0 rounds */
-            c.src_x = 1e-6f * (float)ru(1000);
-            c.src_y = 1e-6f * (float)ru(1000);
-            c.src_w = (float)c.src_width;
-            c.src_h = (float)c.src_height;
+            c.src.x = 1e-6f * (float)ru(1000);
+            c.src.y = 1e-6f * (float)ru(1000);
+            c.src.w = (float)c.src_width;
+            c.src.h = (float)c.src_height;
             c.dst_w = (uint16_t)(1 + ru(2000));
             c.dst_h = (uint16_t)(1 + ru(2000));
             break;
         default: { /* arbitrary float rect */
             float x = rf01() * (float)c.src_width;
             float y = rf01() * (float)c.src_height;
-            c.src_x = x;
-            c.src_y = y;
-            c.src_w = rf01() * ((float)c.src_width - x);
-            c.src_h = rf01() * ((float)c.src_height - y);
+            c.src.x = x;
+            c.src.y = y;
+            c.src.w = rf01() * ((float)c.src_width - x);
+            c.src.h = rf01() * ((float)c.src_height - y);
             c.dst_w = (uint16_t)(1 + ru(ru(4) ? 400 : 65535));
             c.dst_h = (uint16_t)(1 + ru(ru(4) ? 400 : 65535));
             break;
@@ -310,10 +310,10 @@ static void fuzz_resampler(int iters) {
                 (unsigned)c.src_height,
                 (unsigned)c.dst_width,
                 (unsigned)c.dst_height,
-                (double)c.src_x,
-                (double)c.src_y,
-                (double)c.src_w,
-                (double)c.src_h,
+                (double)c.src.x,
+                (double)c.src.y,
+                (double)c.src.w,
+                (double)c.src.h,
                 (int)c.filter
             );
             epi_resampler_t* rr = NULL;
@@ -364,10 +364,10 @@ static void fuzz_resampler(int iters) {
             (unsigned)c.src_height,
             (unsigned)c.dst_width,
             (unsigned)c.dst_height,
-            (double)c.src_x,
-            (double)c.src_y,
-            (double)c.src_w,
-            (double)c.src_h,
+            (double)c.src.x,
+            (double)c.src.y,
+            (double)c.src.w,
+            (double)c.src.h,
             (int)c.dst_x,
             (int)c.dst_y,
             (unsigned)c.dst_w,

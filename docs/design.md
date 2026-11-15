@@ -956,8 +956,7 @@ A build that only uses const panels doesn't link this file.
 
 The resampler (`src/epi_resampler.c`) resizes 8-bit sRGB by separable
 convolution, one axis at a time, in the gamma-encoded domain. It crops a
-source rectangle (`src_x`, `src_y`, `src_w`, `src_h`, in float source
-pixels) to a dst_w × dst_h rectangle and pastes it at (`dst_x`, `dst_y`) on a
+source rectangle (`src`, in float source pixels) to a dst_w × dst_h rectangle and pastes it at (`dst_x`, `dst_y`) on a
 dst_width × dst_height canvas of a background colour; the placement may
 overhang or miss the canvas, and only its visible part is computed. The
 coefficient computation is derived from Pillow's resampling code (see
@@ -1033,8 +1032,8 @@ used.
 An axis is copied instead of convolved when it is the identity: the output
 size equals the source size and the rectangle spans the whole axis from 0.
 Both axes are copied when the rectangle is an integer crop of exactly the
-output size (integer src_x and src_y, with src_w = dst_w and
-src_h = dst_h); a crop of exactly the output size along one axis only still
+output size (integer src.x and src.y, with src.w = dst_w and
+src.h = dst_h); a crop of exactly the output size along one axis only still
 convolves.
 
 ### Layout helpers

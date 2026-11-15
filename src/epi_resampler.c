@@ -226,12 +226,12 @@ static int epi_source_too_large(const epi_resampler_config_t* cfg) {
 
 /* The source rectangle rule (epi_resampler_config_t): finite, x, y ≥ 0,
  * w, h > 0 and the far corner within the source, summed in float. */
-static int epi_rect_valid(float x, float y, float w, float h, uint32_t src_width, uint32_t src_height) {
+static int epi_rect_valid(const epi_rect_t* r, uint32_t src_width, uint32_t src_height) {
     /* False for NaN and −inf; +inf anywhere fails the far-corner test below. */
-    if (!(w > 0.0f) || !(h > 0.0f) || !(x >= 0.0f) || !(y >= 0.0f)) {
+    if (!(r->w > 0.0f) || !(r->h > 0.0f) || !(r->x >= 0.0f) || !(r->y >= 0.0f)) {
         return 0;
     }
-    return x + w <= (float)src_width && y + h <= (float)src_height;
+    return r->x + r->w <= (float)src_width && r->y + r->h <= (float)src_height;
 }
 
 static epi_err_t epi_plan(const epi_resampler_config_t* cfg, epi_rs_plan_t* p) {
@@ -245,12 +245,12 @@ static epi_err_t epi_plan(const epi_resampler_config_t* cfg, epi_rs_plan_t* p) {
         (unsigned)cfg->filter > (unsigned)EPI_FILTER_LANCZOS3) {
         return EPI_ERR_INVALID_ARG;
     }
-    if (!epi_rect_valid(cfg->src_x, cfg->src_y, cfg->src_w, cfg->src_h, cfg->src_width, cfg->src_height)) {
+    if (!epi_rect_valid(&cfg->src, cfg->src_width, cfg->src_height)) {
         return EPI_ERR_INVALID_ARG;
     }
-    const float x0 = cfg->src_x, y0 = cfg->src_y;
-    const float x1 = x0 + cfg->src_w; /* the rect's far corner (x1, y1) */
-    const float y1 = y0 + cfg->src_h;
+    const float x0 = cfg->src.x, y0 = cfg->src.y;
+    const float x1 = x0 + cfg->src.w; /* the rect's far corner (x1, y1) */
+    const float y1 = y0 + cfg->src.h;
 
     memset(p, 0, sizeof *p);
     p->filter = (uint8_t)cfg->filter;
@@ -637,7 +637,7 @@ static epi_err_t epi_layout(epi_resampler_config_t* cfg, const epi_rect_t* regio
         r.w = sw;
         r.h = sh;
     }
-    if (!epi_rect_valid(r.x, r.y, r.w, r.h, cfg->src_width, cfg->src_height)) {
+    if (!epi_rect_valid(&r, cfg->src_width, cfg->src_height)) {
         return EPI_ERR_INVALID_ARG;
     }
     const float dw = (float)cfg->dst_width, dh = (float)cfg->dst_height;
@@ -656,13 +656,11 @@ static epi_err_t epi_layout(epi_resampler_config_t* cfg, const epi_rect_t* regio
         ph = epi_round_extent(r.h * scale, cfg->dst_height);
     }
     /* A guard against rounding: the result must still satisfy the rectangle rule. */
-    if (!epi_rect_valid(x, y, w, h, cfg->src_width, cfg->src_height)) {
+    const epi_rect_t out = {x, y, w, h};
+    if (!epi_rect_valid(&out, cfg->src_width, cfg->src_height)) {
         return EPI_ERR_INVALID_ARG;
     }
-    cfg->src_x = x;
-    cfg->src_y = y;
-    cfg->src_w = w;
-    cfg->src_h = h;
+    cfg->src = out;
     cfg->dst_w = (uint16_t)pw;
     cfg->dst_h = (uint16_t)ph;
     cfg->dst_x = (int32_t)((cfg->dst_width - pw) / 2u);

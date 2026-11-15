@@ -32,7 +32,7 @@ typedef struct {
     const char* name;
     uint16_t src_width, src_height;
     uint32_t seed;
-    uint32_t rect_bits[4]; /* src_x, src_y, src_w, src_h as float32 bits */
+    uint32_t rect_bits[4]; /* src.x, src.y, src.w, src.h as float32 bits */
     uint16_t dst_width, dst_height;
     int32_t dst_x, dst_y;
     uint16_t dst_w, dst_h;
@@ -104,8 +104,8 @@ static epi_resampler_config_t base_cfg(uint32_t sw, uint32_t sh, uint16_t dw, ui
     memset(&c, 0, sizeof c);
     c.src_width = sw;
     c.src_height = sh;
-    c.src_w = (float)sw;
-    c.src_h = (float)sh;
+    c.src.w = (float)sw;
+    c.src.h = (float)sh;
     c.dst_width = dw;
     c.dst_height = dh;
     c.dst_w = dw;
@@ -164,10 +164,9 @@ static epi_rgb_t* resample(const epi_resampler_config_t* c, const epi_rgb_t* src
 static epi_resampler_config_t case_cfg(const epi_rs_case_t* g) {
     epi_resampler_config_t c =
         base_cfg(g->src_width, g->src_height, g->dst_width, g->dst_height, (epi_filter_t)g->filter);
-    c.src_x = bits_f(g->rect_bits[0]);
-    c.src_y = bits_f(g->rect_bits[1]);
-    c.src_w = bits_f(g->rect_bits[2]);
-    c.src_h = bits_f(g->rect_bits[3]);
+    c.src = (epi_rect_t){
+        bits_f(g->rect_bits[0]), bits_f(g->rect_bits[1]), bits_f(g->rect_bits[2]), bits_f(g->rect_bits[3])
+    };
     c.dst_x = g->dst_x;
     c.dst_y = g->dst_y;
     c.dst_w = g->dst_w;
@@ -181,16 +180,16 @@ static epi_resampler_config_t case_cfg(const epi_rs_case_t* g) {
 static void check_layout(const char* name, uint8_t which, const epi_resampler_config_t* want) {
     epi_resampler_config_t c =
         base_cfg(want->src_width, want->src_height, want->dst_width, want->dst_height, EPI_FILTER_BOX);
-    c.src_x = c.src_y = c.src_w = c.src_h = -1.0f;
+    c.src = (epi_rect_t){-1.0f, -1.0f, -1.0f, -1.0f};
     c.dst_x = c.dst_y = -99;
     c.dst_w = c.dst_h = 0;
     TEST_ASSERT_EQUAL_INT(EPI_OK, layout(which, &c, NULL));
     char msg[160];
     snprintf(msg, sizeof msg, "%s: layout differs from the recorded one", name);
-    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src_x), f_bits(c.src_x), msg);
-    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src_y), f_bits(c.src_y), msg);
-    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src_w), f_bits(c.src_w), msg);
-    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src_h), f_bits(c.src_h), msg);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src.x), f_bits(c.src.x), msg);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src.y), f_bits(c.src.y), msg);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src.w), f_bits(c.src.w), msg);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(f_bits(want->src.h), f_bits(c.src.h), msg);
     TEST_ASSERT_EQUAL_INT32_MESSAGE(want->dst_x, c.dst_x, msg);
     TEST_ASSERT_EQUAL_INT32_MESSAGE(want->dst_y, c.dst_y, msg);
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(want->dst_w, c.dst_w, msg);
@@ -359,8 +358,8 @@ static double ref_q8(double v) {
  * reads a first-pass value that the 8-bit clamp changed. */
 static epi_rgb_t* ref_resample(const epi_resampler_config_t* c, const epi_rgb_t* src, int staged, uint8_t* clamped) {
     const uint32_t sw = c->src_width, sh = c->src_height, dw = c->dst_w, dh = c->dst_h;
-    ref_weights_t Wh = ref_axis(sw, c->src_x, c->src_w, dw, (int)c->filter);
-    ref_weights_t Wv = ref_axis(sh, c->src_y, c->src_h, dh, (int)c->filter);
+    ref_weights_t Wh = ref_axis(sw, c->src.x, c->src.w, dw, (int)c->filter);
+    ref_weights_t Wv = ref_axis(sh, c->src.y, c->src.h, dh, (int)c->filter);
     const int v_first = staged && sh > 100u * sw && dh < sh;
     /* First pass into T (rows × cols), second into O (dh × dw). */
     const uint32_t trows = v_first ? dh : sh, tcols = v_first ? sw : dw;
@@ -459,17 +458,17 @@ static epi_resampler_config_t random_cfg(uint64_t* s) {
         }
         epi_resampler_config_t c = base_cfg(sw, sh, 1, 1, (epi_filter_t)rnd(s, 4));
         if (rnd(s, 2)) {
-            c.src_w = (float)(sw * (0.05 + 0.95 * rndf(s)));
-            c.src_x = (float)((sw - c.src_w) * rndf(s));
+            c.src.w = (float)(sw * (0.05 + 0.95 * rndf(s)));
+            c.src.x = (float)((sw - c.src.w) * rndf(s));
         }
         if (rnd(s, 2)) {
-            c.src_h = (float)(sh * (0.05 + 0.95 * rndf(s)));
-            c.src_y = (float)((sh - c.src_h) * rndf(s));
+            c.src.h = (float)(sh * (0.05 + 0.95 * rndf(s)));
+            c.src.y = (float)((sh - c.src.h) * rndf(s));
         }
-        double dw = c.src_w * exp2(4.0 * rndf(s) - 2.0);
-        double dh = c.src_h * exp2(4.0 * rndf(s) - 2.0);
+        double dw = c.src.w * exp2(4.0 * rndf(s) - 2.0);
+        double dh = c.src.h * exp2(4.0 * rndf(s) - 2.0);
         if (rnd(s, 8) == 0) {
-            dw = c.src_w; /* same size */
+            dw = c.src.w; /* same size */
         }
         if (tall) {
             dh = 1 + rnd(s, sh - 1u);
@@ -723,17 +722,14 @@ void test_resampler_mirror(void) {
             const uint32_t kx = rnd(&s, (sw + 1u) / 2u), ky = rnd(&s, (sh + 1u) / 2u);
             const uint32_t w = sw - 2u * kx, h = sh - 2u * ky;
             const uint32_t fx = 1 + rnd(&s, 4), fy = 1 + rnd(&s, 4);
-            c.src_x = (float)kx;
-            c.src_y = (float)ky;
-            c.src_w = (float)w;
-            c.src_h = (float)h;
+            c.src = (epi_rect_t){(float)kx, (float)ky, (float)w, (float)h};
             c.dst_w = (uint16_t)(rnd(&s, 2) ? w * fx : (w % fx ? w : w / fx));
             c.dst_h = (uint16_t)(rnd(&s, 2) ? h * fy : (h % fy ? h : h / fy));
         } else {
-            c.src_w = (float)(1 + rnd(&s, 8u * sw)) / 8.0f;
-            c.src_h = (float)(1 + rnd(&s, 8u * sh)) / 8.0f;
-            c.src_x = ((float)sw - c.src_w) / 2.0f;
-            c.src_y = ((float)sh - c.src_h) / 2.0f;
+            c.src.w = (float)(1 + rnd(&s, 8u * sw)) / 8.0f;
+            c.src.h = (float)(1 + rnd(&s, 8u * sh)) / 8.0f;
+            c.src.x = ((float)sw - c.src.w) / 2.0f;
+            c.src.y = ((float)sh - c.src.h) / 2.0f;
             c.dst_w = (uint16_t)(1 + rnd(&s, 64));
             c.dst_h = (uint16_t)(1 + rnd(&s, 64));
         }
@@ -753,10 +749,10 @@ void test_resampler_mirror(void) {
                 (int)c.filter,
                 sw,
                 sh,
-                c.src_x,
-                c.src_y,
-                c.src_w,
-                c.src_h,
+                c.src.x,
+                c.src.y,
+                c.src.w,
+                c.src.h,
                 c.dst_w,
                 c.dst_h
             );
@@ -787,10 +783,7 @@ void test_resampler_identity(void) {
             const uint16_t kx = w >= 3 ? 1 : 0, ky = h >= 3 ? 1 : 0;
             const uint16_t cw = (uint16_t)(w - 2 * kx), ch = (uint16_t)(h - 2 * ky);
             c = base_cfg(w, h, cw, ch, (epi_filter_t)f);
-            c.src_x = kx;
-            c.src_y = ky;
-            c.src_w = cw;
-            c.src_h = ch;
+            c.src = (epi_rect_t){kx, ky, cw, ch};
             out = resample(&c, src, (unsigned)f, "crop");
             for (uint32_t y = 0; y < ch; y++) {
                 TEST_ASSERT_EQUAL_MEMORY(
@@ -843,49 +836,49 @@ void test_resampler_validation(void) {
     c.filter = (epi_filter_t)-1;
     expect_invalid(&c);
     c = ok;
-    c.src_x = -0.25f;
-    c.src_w = 1.0f;
+    c.src.x = -0.25f;
+    c.src.w = 1.0f;
     expect_invalid(&c);
     c = ok;
-    c.src_y = -1e-30f;
-    c.src_h = 1.0f;
+    c.src.y = -1e-30f;
+    c.src.h = 1.0f;
     expect_invalid(&c);
     c = ok;
-    c.src_w = 0.0f;
+    c.src.w = 0.0f;
     expect_invalid(&c);
     c = ok;
-    c.src_h = -2.0f;
+    c.src.h = -2.0f;
     expect_invalid(&c);
     c = ok;
-    c.src_x = 0.5f;
+    c.src.x = 0.5f;
     expect_invalid(&c); /* x1 = 20.5 > 20 */
     c = ok;
-    c.src_y = 1.0f;
-    c.src_h = 9.0001f;
+    c.src.y = 1.0f;
+    c.src.h = 9.0001f;
     expect_invalid(&c);
     c = ok;
-    c.src_w = 20.000002f;
+    c.src.w = 20.000002f;
     expect_invalid(&c);
     c = ok;
-    c.src_x = NAN;
+    c.src.x = NAN;
     expect_invalid(&c);
     c = ok;
-    c.src_w = INFINITY;
+    c.src.w = INFINITY;
     expect_invalid(&c);
     c = ok;
-    c.src_h = NAN;
+    c.src.h = NAN;
     expect_invalid(&c);
     c = ok;
-    c.src_y = -INFINITY;
+    c.src.y = -INFINITY;
     expect_invalid(&c);
     /* Boundaries that are fine: a box touching the far edges, a sliver. */
     c = ok;
-    c.src_x = 19.0f;
-    c.src_w = 1.0f;
+    c.src.x = 19.0f;
+    c.src.w = 1.0f;
     TEST_ASSERT_NOT_EQUAL(0, epi_resampler_workspace_size(&c));
     c = ok;
-    c.src_y = 9.999f;
-    c.src_h = 0.001f;
+    c.src.y = 9.999f;
+    c.src.h = 0.001f;
     TEST_ASSERT_NOT_EQUAL(0, epi_resampler_workspace_size(&c));
     /* Placement may lie anywhere, including entirely outside the output. */
     c = ok;
@@ -1107,8 +1100,8 @@ void test_resampler_streaming(void) {
 
     /* Crop (integer box of the output's size): rows outside are skipped. */
     c = base_cfg(4, 10, 4, 2, EPI_FILTER_LANCZOS3);
-    c.src_y = 6.0f;
-    c.src_h = 2.0f;
+    c.src.y = 6.0f;
+    c.src.h = 2.0f;
     expect_profile(&c, (const uint32_t[]){0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0});
 
     /* Clipped placement rows above the output still read nothing early:
@@ -1225,11 +1218,11 @@ static void expect_layout_invalid(uint8_t which, epi_resampler_config_t* c, cons
 void test_resampler_layout(void) {
     epi_resampler_config_t c = base_cfg(4000, 3000, 1200, 1600, EPI_FILTER_LANCZOS3);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, NULL)); /* scale = 1600/3000: full height, centred width */
-    EXPECT_F_EQ(0.0f, c.src_y);
-    EXPECT_F_EQ(3000.0f, c.src_h);
-    EXPECT_F_NEAR(2250.0f, c.src_w);
-    EXPECT_F_NEAR(875.0f, c.src_x);
-    TEST_ASSERT_TRUE(c.src_x + c.src_w <= 4000.0f);
+    EXPECT_F_EQ(0.0f, c.src.y);
+    EXPECT_F_EQ(3000.0f, c.src.h);
+    EXPECT_F_NEAR(2250.0f, c.src.w);
+    EXPECT_F_NEAR(875.0f, c.src.x);
+    TEST_ASSERT_TRUE(c.src.x + c.src.w <= 4000.0f);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_x);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_y);
     TEST_ASSERT_EQUAL_UINT16(1200, c.dst_w);
@@ -1238,10 +1231,10 @@ void test_resampler_layout(void) {
 
     c = base_cfg(4000, 3000, 1200, 1600, EPI_FILTER_LANCZOS3);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, NULL)); /* scale = 0.3: 1200 × 900 centred vertically */
-    EXPECT_F_EQ(0.0f, c.src_x);
-    EXPECT_F_EQ(0.0f, c.src_y);
-    EXPECT_F_EQ(4000.0f, c.src_w);
-    EXPECT_F_EQ(3000.0f, c.src_h);
+    EXPECT_F_EQ(0.0f, c.src.x);
+    EXPECT_F_EQ(0.0f, c.src.y);
+    EXPECT_F_EQ(4000.0f, c.src.w);
+    EXPECT_F_EQ(3000.0f, c.src.h);
     TEST_ASSERT_EQUAL_UINT16(1200, c.dst_w);
     TEST_ASSERT_EQUAL_UINT16(900, c.dst_h);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_x);
@@ -1270,8 +1263,8 @@ void test_resampler_layout(void) {
         uint16_t dw = (uint16_t)(1 + (i * 31u) % 1600u), dh = (uint16_t)(1 + (i * 17u) % 1200u);
         c = base_cfg(sw, sh, dw, dh, EPI_FILTER_BOX);
         TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, NULL));
-        TEST_ASSERT_TRUE(c.src_x >= 0.0f && c.src_y >= 0.0f);
-        TEST_ASSERT_TRUE(c.src_x + c.src_w <= (float)sw && c.src_y + c.src_h <= (float)sh);
+        TEST_ASSERT_TRUE(c.src.x >= 0.0f && c.src.y >= 0.0f);
+        TEST_ASSERT_TRUE(c.src.x + c.src.w <= (float)sw && c.src.y + c.src.h <= (float)sh);
         TEST_ASSERT_NOT_EQUAL(0, epi_resampler_workspace_size(&c));
         c = base_cfg(sw, sh, dw, dh, EPI_FILTER_BOX);
         TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, NULL));
@@ -1283,7 +1276,7 @@ void test_resampler_layout(void) {
     /* Zero sizes are invalid and leave the config untouched. */
     for (int z = 0; z < 4; z++) {
         c = base_cfg(z == 0 ? 0 : 10, z == 1 ? 0 : 10, z == 2 ? 0 : 10, z == 3 ? 0 : 10, EPI_FILTER_BOX);
-        c.src_x = 7.0f;
+        c.src.x = 7.0f;
         expect_layout_invalid(1, &c, NULL);
         expect_layout_invalid(2, &c, NULL);
     }
@@ -1312,10 +1305,10 @@ void test_resampler_layout_region(void) {
     const epi_rect_t mid = {100.0f, 50.0f, 200.0f, 100.0f};
     epi_resampler_config_t c = base_cfg(400, 300, 100, 100, EPI_FILTER_BOX);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, &mid));
-    EXPECT_F_EQ(150.0f, c.src_x); /* 100 + (200 − 100)/2 */
-    EXPECT_F_EQ(50.0f, c.src_y);
-    EXPECT_F_EQ(100.0f, c.src_w);
-    EXPECT_F_EQ(100.0f, c.src_h);
+    EXPECT_F_EQ(150.0f, c.src.x); /* 100 + (200 − 100)/2 */
+    EXPECT_F_EQ(50.0f, c.src.y);
+    EXPECT_F_EQ(100.0f, c.src.w);
+    EXPECT_F_EQ(100.0f, c.src.h);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_x);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_y);
     TEST_ASSERT_EQUAL_UINT16(100, c.dst_w);
@@ -1323,10 +1316,10 @@ void test_resampler_layout_region(void) {
     expect_accepted(&c);
     c = base_cfg(400, 300, 100, 100, EPI_FILTER_BOX);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, &mid)); /* scale 0.5: 100 × 50 */
-    EXPECT_F_EQ(100.0f, c.src_x);
-    EXPECT_F_EQ(50.0f, c.src_y);
-    EXPECT_F_EQ(200.0f, c.src_w);
-    EXPECT_F_EQ(100.0f, c.src_h);
+    EXPECT_F_EQ(100.0f, c.src.x);
+    EXPECT_F_EQ(50.0f, c.src.y);
+    EXPECT_F_EQ(200.0f, c.src.w);
+    EXPECT_F_EQ(100.0f, c.src.h);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_x);
     TEST_ASSERT_EQUAL_INT32(25, c.dst_y);
     TEST_ASSERT_EQUAL_UINT16(100, c.dst_w);
@@ -1337,17 +1330,17 @@ void test_resampler_layout_region(void) {
     const epi_rect_t edge = {60.5f, 40.25f, 39.5f, 39.75f};
     c = base_cfg(100, 80, 79, 53, EPI_FILTER_LANCZOS3);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_cover(&c, &edge)); /* scale 2: the width fills */
-    EXPECT_F_EQ(60.5f, c.src_x);
-    EXPECT_F_EQ(39.5f, c.src_w);
-    EXPECT_F_EQ(26.5f, c.src_h);   /* 53 / 2 */
-    EXPECT_F_EQ(46.875f, c.src_y); /* 40.25 + (39.75 − 26.5)/2 */
+    EXPECT_F_EQ(60.5f, c.src.x);
+    EXPECT_F_EQ(39.5f, c.src.w);
+    EXPECT_F_EQ(26.5f, c.src.h);   /* 53 / 2 */
+    EXPECT_F_EQ(46.875f, c.src.y); /* 40.25 + (39.75 − 26.5)/2 */
     expect_accepted(&c);
     c = base_cfg(100, 80, 40, 159, EPI_FILTER_LANCZOS3);
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_layout_fit(&c, &edge)); /* scale 40/39.5: 40 × 40 */
-    EXPECT_F_EQ(60.5f, c.src_x);
-    EXPECT_F_EQ(40.25f, c.src_y);
-    EXPECT_F_EQ(39.5f, c.src_w);
-    EXPECT_F_EQ(39.75f, c.src_h);
+    EXPECT_F_EQ(60.5f, c.src.x);
+    EXPECT_F_EQ(40.25f, c.src.y);
+    EXPECT_F_EQ(39.5f, c.src.w);
+    EXPECT_F_EQ(39.75f, c.src.h);
     TEST_ASSERT_EQUAL_UINT16(40, c.dst_w);
     TEST_ASSERT_EQUAL_UINT16(40, c.dst_h);
     TEST_ASSERT_EQUAL_INT32(0, c.dst_x);
@@ -1380,7 +1373,7 @@ void test_resampler_layout_region(void) {
     for (unsigned i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         for (uint8_t which = 1; which <= 2; which++) {
             c = base_cfg(40, 30, 20, 20, EPI_FILTER_BOX);
-            c.src_x = 3.0f;
+            c.src.x = 3.0f;
             c.dst_x = -5;
             expect_layout_invalid(which, &c, &bad[i]);
         }
