@@ -26,19 +26,25 @@
 #include "epi_intent.h"
 #include "epi_math.h"
 #include "epi_panel_tables.h"
+#include "epi_srgb.h"
 
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
+/* What the pops give; the first successful pop fixes it. */
+enum { POP_ANY, POP_CODES, POP_COLOURS };
+
 struct epi_converter {
     const epi_panel_tables_t* tables;
+    const epi_ink_t* inks; /* the panel's, for the undithered grey colours */
     uint16_t width, height;
     uint32_t pushed; /* input rows accepted */
     uint32_t popped; /* output rows written */
     uint8_t code[EPI_MAX_INKS];
-    void* target; /* colour: int32_t[W][3]; grey: int32_t[W] */
+    uint8_t pop_kind; /* POP_ANY until a pop succeeds */
+    void* target;     /* colour: int32_t[W][3]; grey: int32_t[W] */
     int16_t* hblur;
     int16_t* scratch;
     void* source; /* colour: epi_rgb_t rows; grey: int16_t rows of L*src */
@@ -171,6 +177,7 @@ epi_err_t epi_converter_init(const epi_config_t* cfg, void* workspace, size_t si
     c->source = mem;
 
     c->tables = p->tables;
+    c->inks = p->inks;
     c->width = cfg->width;
     c->height = cfg->height;
     for (size_t i = 0; i < p->ink_count; i++) {
@@ -218,10 +225,9 @@ static void indices_to_codes(const epi_converter_t* c, uint8_t* row) {
     }
 }
 
-epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
-    if (c == NULL || out_row == NULL) {
-        return EPI_ERR_INVALID_ARG;
-    }
+/* S2's vertical pass, S1 (colour) and S3–S6 for the next output row, into
+ * c->target; EPI_OK, or why the row cannot be made yet. */
+static epi_err_t next_target(epi_converter_t* c) {
     if (c->popped >= c->height) {
         return EPI_ERR_FINISHED;
     }
@@ -243,12 +249,88 @@ epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
     const size_t slot = (size_t)(c->popped % (uint32_t)(r + 1)) * w;
     if (c->tables->kind == EPI_PANEL_GREY) {
         epi_intent_grey_row(&c->intent, (int16_t*)c->source + slot, c->scratch, c->target, c->width);
-        epi_dither_grey_row(&c->dither, c->target, out_row);
     } else {
         epi_intent_row(&c->intent, (epi_rgb_t*)c->source + slot, c->scratch, c->target, c->width);
+    }
+    return EPI_OK;
+}
+
+epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
+    if (c == NULL || out_row == NULL || c->pop_kind == POP_COLOURS) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    const epi_err_t e = next_target(c);
+    if (e != EPI_OK) {
+        return e;
+    }
+    if (c->tables->kind == EPI_PANEL_GREY) {
+        epi_dither_grey_row(&c->dither, c->target, out_row);
+    } else {
         epi_dither_row(&c->dither, c->target, out_row);
     }
     indices_to_codes(c, out_row);
+    c->pop_kind = POP_CODES;
+    c->popped++;
+    return EPI_OK;
+}
+
+/* Linear sRGB Q16 to sRGB8 by the preview's rule, after clamping to [0, 1]. */
+static uint8_t lin_to_srgb8(int64_t lin) {
+    return epi_srgb8_from_lin_q16((uint32_t)(lin < 0 ? 0 : lin > EPI_Q16_ONE ? EPI_Q16_ONE : lin));
+}
+
+/* The grey target as a colour: the ditherer's coverage toe, then the two
+ * adjacent levels' measured linear colours mixed by the coverage. */
+static epi_rgb_t grey_colour(const epi_converter_t* c, const epi_grey_tables_t* tb, int32_t t) {
+    const unsigned n = tb->base.ink_count;
+    const int32_t tp = epi_dither_grey_toe(&c->dither, t);
+    int64_t lin[3];
+    if (tp <= tb->level_y[0] || tp >= tb->level_y[n - 1]) {
+        const epi_rgb_t m = c->inks[tp <= tb->level_y[0] ? 0 : n - 1].measured;
+        lin[0] = epi_srgb_to_lin_q16[m.r];
+        lin[1] = epi_srgb_to_lin_q16[m.g];
+        lin[2] = epi_srgb_to_lin_q16[m.b];
+    } else {
+        unsigned g = 0;
+        while (g + 2 < n && tp >= tb->level_y[g + 1]) {
+            g++;
+        }
+        const int64_t gap = tb->level_y[g + 1] - tb->level_y[g];
+        const int64_t k = tp - tb->level_y[g]; /* coverage k / gap of level g + 1 */
+        const epi_rgb_t m0 = c->inks[g].measured, m1 = c->inks[g + 1].measured;
+        const uint8_t a0[3] = {m0.r, m0.g, m0.b}, a1[3] = {m1.r, m1.g, m1.b};
+        for (int ch = 0; ch < 3; ch++) {
+            const int64_t l0 = epi_srgb_to_lin_q16[a0[ch]], l1 = epi_srgb_to_lin_q16[a1[ch]];
+            lin[ch] = (l0 * (gap - k) + l1 * k + gap / 2) / gap;
+        }
+    }
+    return (epi_rgb_t){lin_to_srgb8(lin[0]), lin_to_srgb8(lin[1]), lin_to_srgb8(lin[2])};
+}
+
+epi_err_t epi_converter_pop_undithered(epi_converter_t* c, epi_rgb_t* out_row) {
+    if (c == NULL || out_row == NULL || c->pop_kind == POP_CODES) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    const epi_err_t e = next_target(c);
+    if (e != EPI_OK) {
+        return e;
+    }
+    const size_t w = c->width;
+    if (c->tables->kind == EPI_PANEL_GREY) {
+        const epi_grey_tables_t* tb = epi_grey_tables(c->tables);
+        const int32_t* t = c->target;
+        for (size_t x = 0; x < w; x++) {
+            out_row[x] = grey_colour(c, tb, t[x]);
+        }
+    } else {
+        /* The target is linear sRGB in the inks' own space (an ink's is
+         * epi_srgb_to_lin_q16 of its measured colour). */
+        const int32_t (*t)[3] = c->target;
+        for (size_t x = 0; x < w; x++) {
+            out_row[x] = (epi_rgb_t){lin_to_srgb8(t[x][0]), lin_to_srgb8(t[x][1]), lin_to_srgb8(t[x][2])};
+        }
+    }
+    c->pop_kind = POP_COLOURS;
     c->popped++;
     return EPI_OK;
 }

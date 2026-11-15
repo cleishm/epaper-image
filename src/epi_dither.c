@@ -366,7 +366,7 @@ static inline int32_t toe_fast(const epi_dither_ctx_t* ctx, int32_t t) {
     return toe_in_gap(tb, g, t);
 }
 
-/* Exported for the host tests (declared in epi_dither.h). */
+/* Declared in epi_dither.h, for the converter and the host tests. */
 int32_t epi_dither_grey_toe(const epi_dither_ctx_t* ctx, int32_t t) {
     return toe_fast(ctx, t);
 }

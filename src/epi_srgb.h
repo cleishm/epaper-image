@@ -22,4 +22,23 @@ static inline int64_t epi_srgb_y_q32(epi_rgb_t m) {
         (int64_t)epi_srgb_to_xyz_q16[1][2] * epi_srgb_to_lin_q16[m.b];
 }
 
+/* The sRGB8 code whose linear value is nearest to lin (Q16, at most 65536), by
+ * binary search in epi_srgb_to_lin_q16. An exact midpoint between two codes
+ * goes to the lower one. */
+static inline uint8_t epi_srgb8_from_lin_q16(uint32_t lin) {
+    unsigned lo = 0, hi = 255; /* the first entry not below lin is in [lo, hi] */
+    while (lo < hi) {
+        const unsigned mid = (lo + hi) / 2;
+        if (epi_srgb_to_lin_q16[mid] < lin) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo > 0 && lin - epi_srgb_to_lin_q16[lo - 1] <= epi_srgb_to_lin_q16[lo] - lin) {
+        lo--;
+    }
+    return (uint8_t)lo;
+}
+
 #endif /* EPI_SRGB_H */

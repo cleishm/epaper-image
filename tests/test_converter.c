@@ -11,6 +11,7 @@
 #include "epi_dither.h"
 #include "epi_intent.h"
 #include "epi_panel_tables.h"
+#include "epi_srgb.h"
 #include "test_util.h"
 #include "unity.h"
 
@@ -711,4 +712,252 @@ void test_panel_preset(void) {
     TEST_ASSERT_NULL(epi_panel_preset(&epi_panel_gdey075t7_grey4, "Bright"));
     TEST_ASSERT_NULL(epi_panel_preset(NULL, "Default"));
     TEST_ASSERT_NULL(epi_panel_preset(NULL, NULL));
+}
+
+/* ---- undithered rows ------------------------------------------------------ */
+
+static const epi_panel_t* const builtin_panels[3] =
+    {&epi_panel_el133uf1, &epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
+
+/* run_converter_in with epi_converter_pop_undithered: the same lag, flush and
+ * end. out receives H rows of W colours. Returns the number of rows popped. */
+static int run_undithered_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t size, epi_rgb_t* out) {
+    epi_converter_t* c = NULL;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
+    const size_t rs = cfg->width;
+    const int r = cfg->panel->tables->kernel_radius, h = cfg->height;
+    int n = 0;
+    epi_rgb_t* spare = xmalloc(rs * sizeof *spare);
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare)); /* before any push */
+    for (int y = 0; y < h; y++) {
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * cfg->width));
+        while (n < h && epi_converter_pop_undithered(c, out + (size_t)n * rs) == EPI_OK) {
+            n++;
+        }
+        int expect = y == h - 1 ? h : (y >= r ? y - r + 1 : 0);
+        TEST_ASSERT_EQUAL_INT(expect, n);
+        if (n < h) {
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare));
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_push(c, img));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare));
+    free(spare);
+    return n;
+}
+
+static int run_undithered(const epi_config_t* cfg, const epi_rgb_t* img, epi_rgb_t* out) {
+    size_t size = epi_converter_workspace_size(cfg);
+    TEST_ASSERT_NOT_EQUAL(0, size);
+    void* ws = xmalloc(size);
+    int n = run_undithered_in(cfg, img, ws, size, out);
+    free(ws);
+    return n;
+}
+
+/* Lag, flush and end for heights around each panel's radius. */
+void test_converter_undithered_counts(void) {
+    for (size_t k = 0; k < 3; k++) {
+        const epi_panel_t* p = builtin_panels[k];
+        const int r = p->tables->kernel_radius;
+        const int heights[] = {1, 2, r, r + 1, 2 * r + 2};
+        for (size_t hi = 0; hi < sizeof heights / sizeof heights[0]; hi++) {
+            const int w = 7, h = heights[hi];
+            epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
+            epi_rgb_t* out = xmalloc((size_t)w * h * sizeof *out);
+            fill_noise(img, (size_t)w * h, (uint32_t)(h * 17 + 3));
+            epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h);
+            TEST_ASSERT_EQUAL_INT(h, run_undithered(&cfg, img, out));
+            free(out);
+            free(img);
+        }
+    }
+}
+
+/* A white page gives the white ink's measured colour on every panel and preset;
+ * a black page gives the black ink's on grey panels (the toe leaves the darkest
+ * level solid). */
+void test_converter_undithered_white_black(void) {
+    enum { W = 23, H = 41 };
+    epi_rgb_t* img = xmalloc(W * H * sizeof *img);
+    epi_rgb_t* out = xmalloc(W * H * sizeof *out);
+    for (size_t k = 0; k < 3; k++) {
+        const epi_panel_t* p = builtin_panels[k];
+        const bool grey = p->tables->kind == EPI_PANEL_GREY;
+        size_t white = 0;
+        for (size_t i = 1; i < p->ink_count; i++) {
+            if (epi_srgb_y_q32(p->inks[i].measured) > epi_srgb_y_q32(p->inks[white].measured)) {
+                white = i;
+            }
+        }
+        if (grey) {
+            TEST_ASSERT_EQUAL_size_t(p->ink_count - 1, white);
+        }
+        for (size_t i = 0; i < p->preset_count; i++) {
+            epi_config_t cfg = config(p, W, H);
+            cfg.intent = p->presets[i].intent;
+            for (int j = 0; j < W * H; j++) {
+                img[j] = (epi_rgb_t){255, 255, 255};
+            }
+            run_undithered(&cfg, img, out);
+            for (int j = 0; j < W * H; j++) {
+                TEST_ASSERT_EQUAL_RGB(p->inks[white].measured, out[j]);
+            }
+            if (grey) {
+                for (int j = 0; j < W * H; j++) {
+                    img[j] = (epi_rgb_t){0, 0, 0};
+                }
+                run_undithered(&cfg, img, out);
+                for (int j = 0; j < W * H; j++) {
+                    TEST_ASSERT_EQUAL_RGB(p->inks[0].measured, out[j]);
+                }
+            }
+        }
+    }
+    free(out);
+    free(img);
+}
+
+/* NULL arguments are rejected with no change of state; once a pop of one kind
+ * has written a row, the other kind is rejected with no change of state, and
+ * the first kind goes on to give the same output as a run of it alone. A
+ * pop that writes nothing (not ready) fixes no kind, and init starts afresh. */
+void test_converter_undithered_one_pop_kind(void) {
+    const int w = 13, h = 50;
+    epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
+    fill_noise(img, (size_t)w * h, 31337);
+    for (size_t k = 0; k < 3; k++) {
+        const epi_panel_t* p = builtin_panels[k];
+        epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h);
+        const size_t size = epi_converter_workspace_size(&cfg);
+        void* ws = xmalloc(size);
+        uint8_t* codes_ref = xmalloc((size_t)w * h);
+        uint8_t* codes = xmalloc((size_t)w * h);
+        epi_rgb_t* rgb_ref = xmalloc((size_t)w * h * sizeof *rgb_ref);
+        epi_rgb_t* rgb = xmalloc((size_t)w * h * sizeof *rgb);
+        uint8_t spare_codes[13];
+        epi_rgb_t spare_rgb[13];
+        TEST_ASSERT_EQUAL_INT(h, run_converter(&cfg, img, codes_ref, NULL));
+        TEST_ASSERT_EQUAL_INT(h, run_undithered(&cfg, img, rgb_ref));
+
+        for (int kind = 0; kind < 2; kind++) { /* 0: undithered first; 1: codes first */
+            epi_converter_t* c = NULL;
+            TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(&cfg, ws, size, &c));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(NULL, spare_rgb));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, NULL));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(NULL, spare_codes));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, NULL));
+            /* Not ready: either kind may still be chosen. */
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop(c, spare_codes));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare_rgb));
+            int n = 0;
+            for (int y = 0; y < h; y++) {
+                TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * w));
+                for (;;) {
+                    epi_err_t e;
+                    if (kind == 0) {
+                        e = epi_converter_pop_undithered(c, rgb + (size_t)n * w);
+                    } else {
+                        e = epi_converter_pop(c, codes + (size_t)n * w);
+                    }
+                    if (e != EPI_OK) {
+                        break;
+                    }
+                    n++;
+                    /* The other kind, and NULL arguments, between rows. */
+                    if (kind == 0) {
+                        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, spare_codes));
+                    } else {
+                        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, spare_rgb));
+                    }
+                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, NULL));
+                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, NULL));
+                }
+            }
+            TEST_ASSERT_EQUAL_INT(h, n);
+            if (kind == 0) {
+                TEST_ASSERT_EQUAL_MEMORY(rgb_ref, rgb, (size_t)w * h * sizeof *rgb);
+                TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare_rgb));
+                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, spare_codes));
+            } else {
+                TEST_ASSERT_EQUAL_MEMORY(codes_ref, codes, (size_t)w * h);
+                TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop(c, spare_codes));
+                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, spare_rgb));
+            }
+        }
+        /* Init over the same workspace frees the choice. */
+        TEST_ASSERT_EQUAL_INT(h, run_undithered_in(&cfg, img, ws, size, rgb));
+        TEST_ASSERT_EQUAL_MEMORY(rgb_ref, rgb, (size_t)w * h * sizeof *rgb);
+        free(rgb);
+        free(rgb_ref);
+        free(codes);
+        free(codes_ref);
+        free(ws);
+    }
+    free(img);
+}
+
+/*
+ * Regression goldens for the undithered rows: FNV-1a 64 of the colours for each
+ * built-in panel × input, at the default preset. Update only on an intentional
+ * change: copy the "got" values printed on failure.
+ */
+static const uint64_t undithered_goldens[3][4] = {
+    /* EL133UF1: gradient, hue ramp, noise, page */
+    {UINT64_C(0x94ea2cd26f5a6f61),
+     UINT64_C(0x94b27b6f07cc4391),
+     UINT64_C(0x01bfc2468d1536dc),
+     UINT64_C(0x26c728eb21e768bb)},
+    /* GDEY075T7 mono */
+    {UINT64_C(0xb085022e56b99ed6),
+     UINT64_C(0xafdf4f77db8abdb0),
+     UINT64_C(0xfca7569891a575d7),
+     UINT64_C(0x06845560c3c7fd55)},
+    /* GDEY075T7 grey4 */
+    {UINT64_C(0x78fee5192b3e569a),
+     UINT64_C(0x82cd15627457d82c),
+     UINT64_C(0xf67b5082b661a916),
+     UINT64_C(0xfbb28d6ebfa10d79)},
+};
+
+void test_converter_undithered_goldens(void) {
+    const size_t n = (size_t)GOLDEN_W * GOLDEN_H;
+    epi_rgb_t* img = xmalloc(n * sizeof *img);
+    epi_rgb_t* out = xmalloc(n * sizeof *out);
+    char report[1024];
+    size_t len = 0;
+    int bad = 0;
+    for (int k = 0; k < 3; k++) {
+        len += (size_t)snprintf(report + len, sizeof report - len, "\n    {");
+        for (int i = 0; i < 4; i++) {
+            switch (i) {
+            case 0:
+                fill_gradient(img, GOLDEN_W, GOLDEN_H);
+                break;
+            case 1:
+                fill_hue_ramp(img, GOLDEN_W, GOLDEN_H);
+                break;
+            case 2:
+                fill_noise(img, n, 0x9e3779b9u);
+                break;
+            default:
+                fill_page(img, GOLDEN_W, GOLDEN_H);
+                break;
+            }
+            epi_config_t cfg = config(builtin_panels[k], GOLDEN_W, GOLDEN_H);
+            TEST_ASSERT_EQUAL_INT(GOLDEN_H, run_undithered(&cfg, img, out));
+            uint64_t hsh = fnv1a64((const uint8_t*)out, n * sizeof *out);
+            bad |= hsh != undithered_goldens[k][i];
+            len += (size_t)snprintf(
+                report + len, sizeof report - len, "UINT64_C(0x%016llx)%s", (unsigned long long)hsh, i < 3 ? ", " : "},"
+            );
+        }
+    }
+    free(out);
+    free(img);
+    if (bad) {
+        printf("undithered golden hashes, got:%s\n", report);
+        TEST_FAIL_MESSAGE("undithered output changed (see the golden hashes printed above)");
+    }
 }

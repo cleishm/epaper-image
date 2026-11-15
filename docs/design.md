@@ -1304,9 +1304,9 @@ that alignment minus one byte of slack so any start address works:
 
 The size depends on the panel (through r and the kind) and the width, not
 the height. On a host where that alignment is 8 bytes: the EL133UF1 (r = 18)
-needs 254,695 B at W = 1600, of which the blurred-L\* ring is 118,400 B and
-the source ring 91,200 B, and 191,895 B at W = 1200; the GDEY075T7 (r = 15)
-needs 86,679 B at W = 800. On ESP32 this normally goes in PSRAM.
+needs 257,911 B at W = 1600, of which the blurred-L\* ring is 118,400 B and
+the source ring 91,200 B, and 195,111 B at W = 1200; the GDEY075T7 (r = 15)
+needs 89,895 B at W = 800. On ESP32 this normally goes in PSRAM.
 
 ### Resampler streaming
 
@@ -1377,7 +1377,8 @@ again, and starts another by initialising over the same workspace.
 
 Each converter row is W bytes, one ink code per pixel, mapped from the row of ink
 indices. The preview and the panel's bytes both come from those codes, so there is
-one route to each result and one conversion can give both.
+one route to each result and one conversion can give both. The one other output,
+undithered colours for a draft, is described under "Undithered rows".
 
 `epi_pack_row` packs a row of codes for the panel:
 
@@ -1437,3 +1438,36 @@ The workspace depends only on the preview's width:
 | finished row | dst_width·3 B |
 
 A preview 300 wide needs 11,487 B where alignment is 8 bytes.
+
+### Undithered rows
+
+`epi_converter_pop_undithered` gives each row as W sRGB8 colours instead of
+ink codes: a draft, typically rendered at a reduced size, whose look predicts
+the full render. It runs every stage but S7 and shows, at each pixel, the colour
+the dither aims for, S6's target. Dithering at the draft's size would give
+coarser dots than the panel's; the target needs no dots at all.
+
+The error diffusion aims to reproduce the target on average, and the measured
+preview's linear-light mean shows what it reaches. The two differ where the
+error damping keeps the dither from reaching its target: in mid greys,
+light skin and brick they land up to 2–3 ΔE apart, mostly in a\*. The target is
+linear sRGB in the inks' own space (an ink's is its measured sRGB8 through
+`epi_srgb_to_lin_q16`), so the colours are the measured ones and there is no
+nominal option.
+
+- **sRGB8.** Each channel is clamped to [0, 1] and encoded by the preview's
+  rule, the nearest entry in `epi_srgb_to_lin_q16` with an exact midpoint taking
+  the lower, so a linear colour gives the same code in the draft as in the
+  preview. A target equal to an ink's colour, as white's is, gives that ink's
+  measured sRGB8 exactly.
+- **Grey.** The target is a Y between two levels, but the dither's share of the
+  lighter level is set by the coverage toe (see "S7 on grey: coverage toe"), so
+  the toe comes first. The two adjacent levels' measured linear colours are then
+  mixed by that coverage, per channel, as the preview's mean mixes their dots.
+  Without the toe, areas next to a level, which the dither leaves solid, would
+  be mixed towards the other level.
+
+A converter pops with one function, fixed by its first successful pop. An
+undithered pop does not move the ditherer's error rows, so a dithered row after
+it would diffuse error left from an earlier row; a call of the other pop is
+rejected instead (`EPI_ERR_INVALID_ARG`), with no change of state.
