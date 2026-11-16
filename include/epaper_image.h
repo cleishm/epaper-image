@@ -446,11 +446,9 @@ epi_err_t epi_converter_push(epi_converter_t* c, const epi_rgb_t* row);
  * @p out_row receives @c width bytes, one ink code per pixel. Pass them to
  * epi_preview_push() for a preview and to epi_pack_row() for the panel.
  *
- * A converter pops with one function: once a call of either pop has written
- * a row, a call of the other returns EPI_ERR_INVALID_ARG and changes nothing.
- *
  * @return EPI_OK if a row was written; EPI_ERR_INVALID_ARG for a NULL
- *         argument, or after epi_converter_pop_undithered() has written a row;
+ *         argument, or after epi_converter_pop_undithered() has written a row
+ *         (a converter pops with one function, which then changes nothing);
  *         EPI_ERR_FINISHED if all @c height rows have been popped;
  *         EPI_ERR_NOT_READY if none is ready yet.
  */

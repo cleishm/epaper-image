@@ -633,6 +633,24 @@ static const uint64_t goldens_without_neutral[4][4] = {
      UINT64_C(0xe844a424666ef1ca)},
 };
 
+/* Golden input i (gradient, hue ramp, noise, page) into img, GOLDEN_W × GOLDEN_H. */
+static void fill_golden(epi_rgb_t* img, int i) {
+    switch (i) {
+    case 0:
+        fill_gradient(img, GOLDEN_W, GOLDEN_H);
+        break;
+    case 1:
+        fill_hue_ramp(img, GOLDEN_W, GOLDEN_H);
+        break;
+    case 2:
+        fill_noise(img, (size_t)GOLDEN_W * GOLDEN_H, 0x9e3779b9u);
+        break;
+    default:
+        fill_page(img, GOLDEN_W, GOLDEN_H);
+        break;
+    }
+}
+
 static void check_goldens(const epi_panel_t* pn, const uint64_t want[4][4]) {
     static const char* names[4] = {"gradient", "hue ramp", "noise", "page"};
     const size_t n = (size_t)GOLDEN_W * GOLDEN_H;
@@ -643,20 +661,7 @@ static void check_goldens(const epi_panel_t* pn, const uint64_t want[4][4]) {
     size_t len = 0;
     int bad = 0;
     for (int i = 0; i < 4; i++) {
-        switch (i) {
-        case 0:
-            fill_gradient(img, GOLDEN_W, GOLDEN_H);
-            break;
-        case 1:
-            fill_hue_ramp(img, GOLDEN_W, GOLDEN_H);
-            break;
-        case 2:
-            fill_noise(img, n, 0x9e3779b9u);
-            break;
-        default:
-            fill_page(img, GOLDEN_W, GOLDEN_H);
-            break;
-        }
+        fill_golden(img, i);
         len += (size_t)snprintf(report + len, sizeof report - len, "\n    /* %s */ {", names[i]);
         for (int p = 0; p < 4; p++) {
             epi_config_t cfg = config(pn, GOLDEN_W, GOLDEN_H);
@@ -692,12 +697,15 @@ void test_converter_goldens_without_neutral(void) {
     check_goldens(&p, goldens_without_neutral);
 }
 
+static const epi_panel_t* const builtin_panels[] =
+    {&epi_panel_el133uf1, &epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
+#define BUILTIN_COUNT (sizeof builtin_panels / sizeof builtin_panels[0])
+
 /* epi_panel_preset finds every listed preset by name in any case, NULL finds
  * the default, and nothing else is found. */
 void test_panel_preset(void) {
-    const epi_panel_t* panels[] = {&epi_panel_el133uf1, &epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
-    for (size_t p = 0; p < sizeof panels / sizeof panels[0]; p++) {
-        const epi_panel_t* panel = panels[p];
+    for (size_t p = 0; p < BUILTIN_COUNT; p++) {
+        const epi_panel_t* panel = builtin_panels[p];
         for (size_t i = 0; i < panel->preset_count; i++) {
             TEST_ASSERT_EQUAL_PTR(panel->presets[i].intent, epi_panel_preset(panel, panel->presets[i].name));
         }
@@ -716,49 +724,19 @@ void test_panel_preset(void) {
 
 /* ---- undithered rows ------------------------------------------------------ */
 
-static const epi_panel_t* const builtin_panels[3] =
-    {&epi_panel_el133uf1, &epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
-
-/* run_converter_in with epi_converter_pop_undithered: the same lag, flush and
- * end. out receives H rows of W colours. Returns the number of rows popped. */
+/* run_rows(_in) with epi_converter_pop_undithered: out receives H rows of W
+ * colours. */
 static int run_undithered_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t size, epi_rgb_t* out) {
-    epi_converter_t* c = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
-    const size_t rs = cfg->width;
-    const int r = cfg->panel->tables->kernel_radius, h = cfg->height;
-    int n = 0;
-    epi_rgb_t* spare = xmalloc(rs * sizeof *spare);
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare)); /* before any push */
-    for (int y = 0; y < h; y++) {
-        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * cfg->width));
-        while (n < h && epi_converter_pop_undithered(c, out + (size_t)n * rs) == EPI_OK) {
-            n++;
-        }
-        int expect = y == h - 1 ? h : (y >= r ? y - r + 1 : 0);
-        TEST_ASSERT_EQUAL_INT(expect, n);
-        if (n < h) {
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare));
-        }
-    }
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_push(c, img));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare));
-    free(spare);
-    return n;
+    return run_rows_in(cfg, img, ws, size, pop_undithered, cfg->width * sizeof *out, out, NULL);
 }
 
 static int run_undithered(const epi_config_t* cfg, const epi_rgb_t* img, epi_rgb_t* out) {
-    size_t size = epi_converter_workspace_size(cfg);
-    TEST_ASSERT_NOT_EQUAL(0, size);
-    void* ws = xmalloc(size);
-    int n = run_undithered_in(cfg, img, ws, size, out);
-    free(ws);
-    return n;
+    return run_rows(cfg, img, pop_undithered, cfg->width * sizeof *out, out, NULL);
 }
 
 /* Lag, flush and end for heights around each panel's radius. */
 void test_converter_undithered_counts(void) {
-    for (size_t k = 0; k < 3; k++) {
+    for (size_t k = 0; k < BUILTIN_COUNT; k++) {
         const epi_panel_t* p = builtin_panels[k];
         const int r = p->tables->kernel_radius;
         const int heights[] = {1, 2, r, r + 1, 2 * r + 2};
@@ -782,7 +760,7 @@ void test_converter_undithered_white_black(void) {
     enum { W = 23, H = 41 };
     epi_rgb_t* img = xmalloc(W * H * sizeof *img);
     epi_rgb_t* out = xmalloc(W * H * sizeof *out);
-    for (size_t k = 0; k < 3; k++) {
+    for (size_t k = 0; k < BUILTIN_COUNT; k++) {
         const epi_panel_t* p = builtin_panels[k];
         const bool grey = p->tables->kind == EPI_PANEL_GREY;
         size_t white = 0;
@@ -827,7 +805,7 @@ void test_converter_undithered_one_pop_kind(void) {
     const int w = 13, h = 50;
     epi_rgb_t* img = xmalloc((size_t)w * h * sizeof *img);
     fill_noise(img, (size_t)w * h, 31337);
-    for (size_t k = 0; k < 3; k++) {
+    for (size_t k = 0; k < BUILTIN_COUNT; k++) {
         const epi_panel_t* p = builtin_panels[k];
         epi_config_t cfg = config(p, (uint16_t)w, (uint16_t)h);
         const size_t size = epi_converter_workspace_size(&cfg);
@@ -836,55 +814,45 @@ void test_converter_undithered_one_pop_kind(void) {
         uint8_t* codes = xmalloc((size_t)w * h);
         epi_rgb_t* rgb_ref = xmalloc((size_t)w * h * sizeof *rgb_ref);
         epi_rgb_t* rgb = xmalloc((size_t)w * h * sizeof *rgb);
-        uint8_t spare_codes[13];
-        epi_rgb_t spare_rgb[13];
+        epi_rgb_t spare[13]; /* a row of either kind */
         TEST_ASSERT_EQUAL_INT(h, run_converter(&cfg, img, codes_ref, NULL));
         TEST_ASSERT_EQUAL_INT(h, run_undithered(&cfg, img, rgb_ref));
+        /* 0: undithered first; 1: codes first. */
+        const struct {
+            converter_pop_fn pop, other;
+            uint8_t* out;
+            const void* ref;
+            size_t row_size;
+        } kinds[2] = {
+            {pop_undithered, pop_codes, (uint8_t*)rgb, rgb_ref, (size_t)w * sizeof *rgb},
+            {pop_codes, pop_undithered, codes, codes_ref, (size_t)w},
+        };
 
-        for (int kind = 0; kind < 2; kind++) { /* 0: undithered first; 1: codes first */
+        for (size_t kind = 0; kind < 2; kind++) {
+            const converter_pop_fn pop = kinds[kind].pop, other = kinds[kind].other;
+            const size_t row_size = kinds[kind].row_size;
             epi_converter_t* c = NULL;
             TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(&cfg, ws, size, &c));
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(NULL, spare_rgb));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(NULL, spare));
             TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, NULL));
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(NULL, spare_codes));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(NULL, (uint8_t*)spare));
             TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, NULL));
             /* Not ready: either kind may still be chosen. */
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop(c, spare_codes));
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop_undithered(c, spare_rgb));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, pop_codes(c, spare));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, pop_undithered(c, spare));
             int n = 0;
             for (int y = 0; y < h; y++) {
                 TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * w));
-                for (;;) {
-                    epi_err_t e;
-                    if (kind == 0) {
-                        e = epi_converter_pop_undithered(c, rgb + (size_t)n * w);
-                    } else {
-                        e = epi_converter_pop(c, codes + (size_t)n * w);
-                    }
-                    if (e != EPI_OK) {
-                        break;
-                    }
+                while (pop(c, kinds[kind].out + (size_t)n * row_size) == EPI_OK) {
                     n++;
-                    /* The other kind, and NULL arguments, between rows. */
-                    if (kind == 0) {
-                        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, spare_codes));
-                    } else {
-                        TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, spare_rgb));
-                    }
-                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, NULL));
-                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, NULL));
+                    /* The other kind, between rows. */
+                    TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, other(c, spare));
                 }
             }
             TEST_ASSERT_EQUAL_INT(h, n);
-            if (kind == 0) {
-                TEST_ASSERT_EQUAL_MEMORY(rgb_ref, rgb, (size_t)w * h * sizeof *rgb);
-                TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop_undithered(c, spare_rgb));
-                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop(c, spare_codes));
-            } else {
-                TEST_ASSERT_EQUAL_MEMORY(codes_ref, codes, (size_t)w * h);
-                TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop(c, spare_codes));
-                TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, epi_converter_pop_undithered(c, spare_rgb));
-            }
+            TEST_ASSERT_EQUAL_MEMORY(kinds[kind].ref, kinds[kind].out, (size_t)h * row_size);
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, pop(c, spare));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_INVALID_ARG, other(c, spare));
         }
         /* Init over the same workspace frees the choice. */
         TEST_ASSERT_EQUAL_INT(h, run_undithered_in(&cfg, img, ws, size, rgb));
@@ -920,6 +888,7 @@ static const uint64_t undithered_goldens[3][4] = {
      UINT64_C(0xf67b5082b661a916),
      UINT64_C(0xfbb28d6ebfa10d79)},
 };
+_Static_assert(sizeof undithered_goldens / sizeof undithered_goldens[0] == BUILTIN_COUNT, "a row per built-in panel");
 
 /* FNV-1a 64 of all undithered rows in order, hashed a row at a time so only one
  * row of output is held (the ESP32's largest free block takes the image alone). */
@@ -930,16 +899,12 @@ static uint64_t undithered_hash(const epi_config_t* cfg, const epi_rgb_t* img) {
     epi_rgb_t* row = xmalloc(cfg->width * sizeof *row);
     epi_converter_t* c = NULL;
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
-    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    uint64_t h = FNV1A64_INIT;
     int n = 0;
     for (int y = 0; y < cfg->height; y++) {
         TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * cfg->width));
         while (epi_converter_pop_undithered(c, row) == EPI_OK) {
-            const uint8_t* p = (const uint8_t*)row;
-            for (size_t i = 0; i < cfg->width * sizeof *row; i++) {
-                h ^= p[i];
-                h *= UINT64_C(0x100000001b3);
-            }
+            h = fnv1a64_update(h, (const uint8_t*)row, cfg->width * sizeof *row);
             n++;
         }
     }
@@ -955,23 +920,10 @@ void test_converter_undithered_goldens(void) {
     char report[1024];
     size_t len = 0;
     int bad = 0;
-    for (int k = 0; k < 3; k++) {
+    for (size_t k = 0; k < BUILTIN_COUNT; k++) {
         len += (size_t)snprintf(report + len, sizeof report - len, "\n    {");
         for (int i = 0; i < 4; i++) {
-            switch (i) {
-            case 0:
-                fill_gradient(img, GOLDEN_W, GOLDEN_H);
-                break;
-            case 1:
-                fill_hue_ramp(img, GOLDEN_W, GOLDEN_H);
-                break;
-            case 2:
-                fill_noise(img, n, 0x9e3779b9u);
-                break;
-            default:
-                fill_page(img, GOLDEN_W, GOLDEN_H);
-                break;
-            }
+            fill_golden(img, i);
             epi_config_t cfg = config(builtin_panels[k], GOLDEN_W, GOLDEN_H);
             uint64_t hsh = undithered_hash(&cfg, img);
             bad |= hsh != undithered_goldens[k][i];

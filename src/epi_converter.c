@@ -33,18 +33,15 @@
 #include <stdint.h>
 #include <string.h>
 
-/* What the pops give; the first successful pop fixes it. */
-enum { POP_ANY, POP_CODES, POP_COLOURS };
-
 struct epi_converter {
     const epi_panel_tables_t* tables;
-    int32_t ink_lin[EPI_MAX_INKS][3]; /* measured, linear Q16: undithered grey colours */
+    int32_t ink_lin[EPI_MAX_INKS][3]; /* grey: the levels' measured colours, linear Q16 */
     uint16_t width, height;
     uint32_t pushed; /* input rows accepted */
     uint32_t popped; /* output rows written */
     uint8_t code[EPI_MAX_INKS];
-    uint8_t pop_kind; /* POP_ANY until a pop succeeds */
-    void* target;     /* colour: int32_t[W][3]; grey: int32_t[W] */
+    bool undithered; /* which pop the rows came from, once popped > 0 */
+    void* target;    /* colour: int32_t[W][3]; grey: int32_t[W] */
     int16_t* hblur;
     int16_t* scratch;
     void* source; /* colour: epi_rgb_t rows; grey: int16_t rows of L*src */
@@ -181,10 +178,12 @@ epi_err_t epi_converter_init(const epi_config_t* cfg, void* workspace, size_t si
     c->height = cfg->height;
     for (size_t i = 0; i < p->ink_count; i++) {
         c->code[i] = p->inks[i].code;
-        const epi_rgb_t m = p->inks[i].measured;
-        c->ink_lin[i][0] = (int32_t)epi_srgb_to_lin_q16[m.r];
-        c->ink_lin[i][1] = (int32_t)epi_srgb_to_lin_q16[m.g];
-        c->ink_lin[i][2] = (int32_t)epi_srgb_to_lin_q16[m.b];
+        if (p->tables->kind == EPI_PANEL_GREY) {
+            const epi_rgb_t m = p->inks[i].measured;
+            c->ink_lin[i][0] = (int32_t)epi_srgb_to_lin_q16[m.r];
+            c->ink_lin[i][1] = (int32_t)epi_srgb_to_lin_q16[m.g];
+            c->ink_lin[i][2] = (int32_t)epi_srgb_to_lin_q16[m.b];
+        }
     }
     epi_dither_init(&c->dither, p->tables, cfg->width, err_mem);
 
@@ -259,7 +258,7 @@ static epi_err_t next_target(epi_converter_t* c) {
 }
 
 epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
-    if (c == NULL || out_row == NULL || c->pop_kind == POP_COLOURS) {
+    if (c == NULL || out_row == NULL || (c->popped > 0 && c->undithered)) {
         return EPI_ERR_INVALID_ARG;
     }
     const epi_err_t e = next_target(c);
@@ -272,13 +271,12 @@ epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
         epi_dither_row(&c->dither, c->target, out_row);
     }
     indices_to_codes(c, out_row);
-    c->pop_kind = POP_CODES;
     c->popped++;
     return EPI_OK;
 }
 
 /* Linear sRGB Q16 to sRGB8 by the preview's rule, after clamping to [0, 1]. */
-static uint8_t lin_to_srgb8(int64_t lin) {
+static uint8_t lin_to_srgb8(int32_t lin) {
     return epi_srgb8_from_lin_q16((uint32_t)(lin < 0 ? 0 : lin > EPI_Q16_ONE ? EPI_Q16_ONE : lin));
 }
 
@@ -286,30 +284,26 @@ static uint8_t lin_to_srgb8(int64_t lin) {
  * adjacent levels' measured linear colours mixed by the coverage. */
 static epi_rgb_t grey_colour(const epi_converter_t* c, const epi_grey_tables_t* tb, int32_t t) {
     const unsigned n = tb->base.ink_count;
-    const int32_t tp = epi_dither_grey_toe(&c->dither, t);
-    int64_t lin[3];
-    if (tp <= tb->level_y[0] || tp >= tb->level_y[n - 1]) {
-        const int32_t* l = c->ink_lin[tp <= tb->level_y[0] ? 0 : n - 1];
-        lin[0] = l[0];
-        lin[1] = l[1];
-        lin[2] = l[2];
-    } else {
-        unsigned g = 0;
-        while (g + 2 < n && tp >= tb->level_y[g + 1]) {
-            g++;
-        }
-        const int64_t gap = tb->level_y[g + 1] - tb->level_y[g];
-        const int64_t k = tp - tb->level_y[g]; /* coverage k / gap of level g + 1 */
-        for (int ch = 0; ch < 3; ch++) {
-            const int64_t l0 = c->ink_lin[g][ch], l1 = c->ink_lin[g + 1][ch];
-            lin[ch] = (l0 * (gap - k) + l1 * k + gap / 2) / gap;
-        }
+    int32_t tp = epi_dither_grey_toe(&c->dither, t);
+    /* Beyond the end levels the mix gives that level's colour exactly. */
+    tp = tp < tb->level_y[0] ? tb->level_y[0] : tp > tb->level_y[n - 1] ? tb->level_y[n - 1] : tp;
+    unsigned g = 0;
+    while (g + 2 < n && tp >= tb->level_y[g + 1]) {
+        g++;
     }
-    return (epi_rgb_t){lin_to_srgb8(lin[0]), lin_to_srgb8(lin[1]), lin_to_srgb8(lin[2])};
+    const int64_t gap = tb->level_y[g + 1] - tb->level_y[g];
+    const int64_t k = tp - tb->level_y[g]; /* coverage k / gap of level g + 1 */
+    uint8_t out[3];
+    for (int ch = 0; ch < 3; ch++) {
+        const int64_t l0 = c->ink_lin[g][ch], l1 = c->ink_lin[g + 1][ch];
+        /* A mix of two values in [0, 1]: no clamp needed. */
+        out[ch] = epi_srgb8_from_lin_q16((uint32_t)((l0 * (gap - k) + l1 * k + gap / 2) / gap));
+    }
+    return (epi_rgb_t){out[0], out[1], out[2]};
 }
 
 epi_err_t epi_converter_pop_undithered(epi_converter_t* c, epi_rgb_t* out_row) {
-    if (c == NULL || out_row == NULL || c->pop_kind == POP_CODES) {
+    if (c == NULL || out_row == NULL || (c->popped > 0 && !c->undithered)) {
         return EPI_ERR_INVALID_ARG;
     }
     const epi_err_t e = next_target(c);
@@ -331,7 +325,7 @@ epi_err_t epi_converter_pop_undithered(epi_converter_t* c, epi_rgb_t* out_row) {
             out_row[x] = (epi_rgb_t){lin_to_srgb8(t[x][0]), lin_to_srgb8(t[x][1]), lin_to_srgb8(t[x][2])};
         }
     }
-    c->pop_kind = POP_COLOURS;
+    c->undithered = true;
     c->popped++;
     return EPI_OK;
 }

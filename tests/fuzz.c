@@ -597,16 +597,17 @@ static long cv_ok;
 static long cv_undithered;
 static long grey_rand;
 
-/* The next row by the chosen pop into out (codes) or col (colours); once a
- * row has come out, the other pop must be rejected. */
-static epi_err_t pop_either(epi_converter_t* cv, bool undithered, uint8_t* out, epi_rgb_t* col, uint32_t got) {
+/* The next row by the chosen pop into out (codes or colours, width × 3 bytes);
+ * once a row has come out, the other pop must be rejected. */
+static epi_err_t pop_either(epi_converter_t* cv, bool undithered, uint8_t* out, uint32_t got) {
     if (got > 0) {
         CHECK(
-            (undithered ? epi_converter_pop(cv, out) : epi_converter_pop_undithered(cv, col)) == EPI_ERR_INVALID_ARG,
+            (undithered ? epi_converter_pop(cv, out) : epi_converter_pop_undithered(cv, (epi_rgb_t*)out)) ==
+                EPI_ERR_INVALID_ARG,
             "the other pop was accepted"
         );
     }
-    return undithered ? epi_converter_pop_undithered(cv, col) : epi_converter_pop(cv, out);
+    return undithered ? epi_converter_pop_undithered(cv, (epi_rgb_t*)out) : epi_converter_pop(cv, out);
 }
 
 static void fuzz_converter(int iters) {
@@ -652,10 +653,9 @@ static void fuzz_converter(int iters) {
         epi_err_t e = epi_converter_init(&c, raw + mis, need, &cv);
         CHECK(e == EPI_OK, "converter init: %s", epi_strerror(e));
         const bool undithered = ru(2) == 0;
-        uint8_t* out = malloc(c.width);
-        epi_rgb_t* col = malloc((size_t)c.width * sizeof *col);
+        uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
         epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
-        CHECK(out != NULL && col != NULL && row != NULL, "out of memory");
+        CHECK(out != NULL && row != NULL, "out of memory");
         int mode = (int)ru(8);
         uint32_t got = 0;
         for (uint32_t y = 0; y < c.height; y++) {
@@ -664,13 +664,12 @@ static void fuzz_converter(int iters) {
             }
             fill(row, c.width, mode, y);
             CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
-            while (pop_either(cv, undithered, out, col, got) == EPI_OK) {
+            while (pop_either(cv, undithered, out, got) == EPI_OK) {
                 got++;
             }
         }
         CHECK(got == c.height, "converter emitted %u rows, want %u", (unsigned)got, (unsigned)c.height);
         free(out);
-        free(col);
         free(row);
         free(raw);
         cv_ok++;
@@ -1070,10 +1069,9 @@ static void fuzz_colour(int iters) {
             );
             const bool undithered = conv == 2;
             uint8_t* raw = malloc(cneed);
-            uint8_t* out = malloc(c.width);
-            epi_rgb_t* col = malloc((size_t)c.width * sizeof *col);
+            uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
             epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
-            CHECK(raw != NULL && out != NULL && col != NULL && row != NULL, "out of memory");
+            CHECK(raw != NULL && out != NULL && row != NULL, "out of memory");
             epi_converter_t* cv = NULL;
             CHECK(epi_converter_init(&c, raw, cneed, &cv) == EPI_OK, "converter init failed on an accepted panel");
             int mode = (int)ru(8);
@@ -1084,21 +1082,22 @@ static void fuzz_colour(int iters) {
                 }
                 fill(row, c.width, mode, y);
                 CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
-                while (pop_either(cv, undithered, out, col, got) == EPI_OK) {
+                while (pop_either(cv, undithered, out, got) == EPI_OK) {
                     got++;
                     rows++;
-                    for (uint32_t x = 0; !undithered && x < c.width; x++) {
-                        size_t i = 0;
-                        while (i < p->ink_count && p->inks[i].code != out[x]) {
-                            i++;
+                    if (!undithered) {
+                        for (uint32_t x = 0; x < c.width; x++) {
+                            size_t i = 0;
+                            while (i < p->ink_count && p->inks[i].code != out[x]) {
+                                i++;
+                            }
+                            CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
                         }
-                        CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
                     }
                 }
             }
             CHECK(got == c.height, "converter emitted %u rows, want %u", (unsigned)got, (unsigned)c.height);
             free(row);
-            free(col);
             free(out);
             free(raw);
         }
