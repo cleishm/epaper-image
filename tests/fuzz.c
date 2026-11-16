@@ -17,6 +17,11 @@
  * random intents, the last undithered: init must only accept what the
  * converter can run without undefined behaviour. Converters pop with
  * epi_converter_pop or epi_converter_pop_undithered, and must refuse the other.
+ * Source rectangles are also set directly, not only by a layout: not finite,
+ * negative, -0, denormal, huge, and slivers at the far edge, which init must
+ * reject, or accept and then run. Random neutral-cast knots, valid or not, go
+ * on the shipped colour inks, and each accepted panel converts greys,
+ * near-neutrals and random rows.
  *
  * Every check exits nonzero with a message in every build type; the
  * sanitizers report the memory and undefined-behaviour errors.
@@ -24,9 +29,10 @@
  *   epaper_image_fuzz [iterations [seed [colour-iterations]]]
  *
  * iterations (default 3000) is the resampler count; the source-limit check
- * runs as many, and the converter, the reducer and the packer a third as many
- * each. An accepted colour panel costs about 400,000 in-gamut tests, so the colour count
- * is its own, by default a hundredth of iterations. The default seed is fixed,
+ * runs as many, the converter, the reducer and the packer a third as many
+ * each, and the direct rectangles a quarter. An accepted colour panel costs
+ * about 400,000 in-gamut tests, so the colour count, which the neutral knots
+ * share, is its own, by default a hundredth of iterations. The default seed is fixed,
  * so a run is reproducible; a seed, if given, is mixed into it. Built with
  * -DEPAPER_IMAGE_BUILD_FUZZ=ON;
  * run under ctest, ideally with -fsanitize=address,undefined.
@@ -545,9 +551,19 @@ static void fill(epi_rgb_t* row, uint32_t w, int mode, uint32_t y) {
         case 6:
             row[x] = ((x ^ y) & 1) ? prim[0] : prim[1];
             break;
-        default:
+        case 7:
             row[x] = (epi_rgb_t){(uint8_t)(x * 255 / (w ? w : 1)), (uint8_t)y, (uint8_t)(255 - x)};
             break;
+        default: { /* grey or near-neutral, where neutral-cast knots act */
+            const int v = (int)ru(256), s = ru(4) ? 0 : 6;
+            int ch[3];
+            for (int i = 0; i < 3; i++) {
+                ch[i] = v + (int)ru(2u * (unsigned)s + 1u) - s;
+                ch[i] = ch[i] < 0 ? 0 : ch[i] > 255 ? 255 : ch[i];
+            }
+            row[x] = (epi_rgb_t){(uint8_t)ch[0], (uint8_t)ch[1], (uint8_t)ch[2]};
+            break;
+        }
         }
     }
 }
@@ -988,6 +1004,55 @@ static bool check_progress(void* ctx, unsigned done, unsigned total) {
     return done != pc->cancel_at;
 }
 
+/* Converts a small image on the colour panel p with a random intent (sometimes
+ * the default), by the chosen pop; every code must be an ink. Rows of random
+ * modes, or only greys and near-neutrals. Returns the rows emitted. */
+static long convert_small(const epi_panel_t* p, bool undithered, bool neutral, int it) {
+    long rows = 0;
+    epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f, rf01() * 20.0f};
+    if (ru(2) == 0) {
+        in = (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4), (float)ru(21)};
+    }
+    epi_config_t c = {p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(64)), (uint16_t)(1 + ru(40))};
+    size_t cneed = epi_converter_workspace_size(&c);
+    CHECK(
+        cneed != 0, "the converter refused an accepted panel [seed=%llu iteration=%d]", (unsigned long long)seed_arg, it
+    );
+    uint8_t* raw = malloc(cneed);
+    uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
+    epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
+    CHECK(raw != NULL && out != NULL && row != NULL, "out of memory");
+    epi_converter_t* cv = NULL;
+    CHECK(epi_converter_init(&c, raw, cneed, &cv) == EPI_OK, "converter init failed on an accepted panel");
+    int mode = neutral ? 8 : (int)ru(8);
+    uint32_t got = 0;
+    for (uint32_t y = 0; y < c.height; y++) {
+        if (!neutral && ru(4) == 0) {
+            mode = (int)ru(8);
+        }
+        fill(row, c.width, mode, y);
+        CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
+        while (pop_either(cv, undithered, out, got) == EPI_OK) {
+            got++;
+            rows++;
+            if (!undithered) {
+                for (uint32_t x = 0; x < c.width; x++) {
+                    size_t i = 0;
+                    while (i < p->ink_count && p->inks[i].code != out[x]) {
+                        i++;
+                    }
+                    CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
+                }
+            }
+        }
+    }
+    CHECK(got == c.height, "converter emitted %u rows, want %u", (unsigned)got, (unsigned)c.height);
+    free(row);
+    free(out);
+    free(raw);
+    return rows;
+}
+
 static void fuzz_colour(int iters) {
     static const float sig[] = {FLT_TRUE_MIN, 0.01f, 0.3f, 1.f, 6.f, 10.5f};
     long ok = 0, rejected = 0, cancelled = 0, rows = 0, zero_black = 0;
@@ -1054,52 +1119,7 @@ static void fuzz_colour(int iters) {
             zero_black += inks[i].measured.r == 0 && inks[i].measured.g == 0 && inks[i].measured.b == 0;
         }
         for (int conv = 0; conv < 3; conv++) {
-            epi_intent_t in = {rf01(), rf01(), rf01(), rf01() * 3.0f, rf01() * 3.0f, rf01() * 20.0f};
-            if (ru(2) == 0) {
-                in =
-                    (epi_intent_t){(float)ru(2), (float)ru(2), (float)ru(2), (float)ru(4), (float)ru(4), (float)ru(21)};
-            }
-            epi_config_t c = {p, ru(4) ? &in : NULL, (uint16_t)(1 + ru(64)), (uint16_t)(1 + ru(40))};
-            size_t cneed = epi_converter_workspace_size(&c);
-            CHECK(
-                cneed != 0,
-                "the converter refused an accepted panel [seed=%llu iteration=%d]",
-                (unsigned long long)seed_arg,
-                it
-            );
-            const bool undithered = conv == 2;
-            uint8_t* raw = malloc(cneed);
-            uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
-            epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
-            CHECK(raw != NULL && out != NULL && row != NULL, "out of memory");
-            epi_converter_t* cv = NULL;
-            CHECK(epi_converter_init(&c, raw, cneed, &cv) == EPI_OK, "converter init failed on an accepted panel");
-            int mode = (int)ru(8);
-            uint32_t got = 0;
-            for (uint32_t y = 0; y < c.height; y++) {
-                if (ru(4) == 0) {
-                    mode = (int)ru(8);
-                }
-                fill(row, c.width, mode, y);
-                CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
-                while (pop_either(cv, undithered, out, got) == EPI_OK) {
-                    got++;
-                    rows++;
-                    if (!undithered) {
-                        for (uint32_t x = 0; x < c.width; x++) {
-                            size_t i = 0;
-                            while (i < p->ink_count && p->inks[i].code != out[x]) {
-                                i++;
-                            }
-                            CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
-                        }
-                    }
-                }
-            }
-            CHECK(got == c.height, "converter emitted %u rows, want %u", (unsigned)got, (unsigned)c.height);
-            free(row);
-            free(out);
-            free(raw);
+            rows += convert_small(p, conv == 2, false, it);
         }
         free(store);
     }
@@ -1113,6 +1133,301 @@ static void fuzz_colour(int iters) {
     );
 }
 
+/* One axis of a source rectangle set directly, not by a layout: a layout
+ * region (raxis), a position or a length or both that is not finite, negative,
+ * -0, denormal or huge, or a sliver at the far edge. */
+static void rsrc_axis(uint32_t side, float* pos, float* len) {
+    static const float odd[] = {
+        NAN, -NAN, INFINITY, -INFINITY, -1.0f, -FLT_TRUE_MIN, -0.0f, 0.0f, FLT_TRUE_MIN, FLT_MIN / 3.0f, 1e30f, FLT_MAX
+    };
+    static const float tiny[] = {FLT_TRUE_MIN, FLT_MIN / 3.0f, FLT_MIN, 1e-30f, 1e-7f, 0.001f};
+    const float s = (float)side;
+    switch (ru(5)) {
+    case 0:
+        *pos = odd[ru(sizeof odd / sizeof odd[0])];
+        *len = ru(2) ? 1.0f : s;
+        break;
+    case 1:
+        *pos = ru(2) ? 0.0f : rf01() * s;
+        *len = odd[ru(sizeof odd / sizeof odd[0])];
+        break;
+    case 2:
+        *pos = odd[ru(sizeof odd / sizeof odd[0])];
+        *len = odd[ru(sizeof odd / sizeof odd[0])];
+        break;
+    case 3: /* x = side or just inside it, tiny length */
+        *len = tiny[ru(sizeof tiny / sizeof tiny[0])];
+        *pos = ru(2) ? s : s - *len;
+        break;
+    default:
+        raxis(side, pos, len);
+        break;
+    }
+}
+
+/* Source rectangles set directly, valid or not, on small sources (sometimes
+ * one up to 65535 wide, or 65535×65535 on a 65535-wide canvas). A rectangle that breaks the rule must give size 0 and
+ * EPI_ERR_INVALID_ARG; a valid one may give size 0 only where the workspace
+ * can't be addressed (a 32-bit target), and otherwise must init with exactly
+ * that size and emit every row. */
+static void fuzz_rects(int iters) {
+    long ok = 0, invalid = 0, unaddressable = 0, init_only = 0, skipped = 0, rows = 0;
+    for (int it = 0; it < iters; it++) {
+        epi_resampler_config_t c;
+        memset(&c, 0, sizeof c);
+        c.src_width = rdim(1);
+        c.src_height = ru(4) ? 1 + ru(64) : rdim(1);
+        c.dst_width = (uint16_t)(1 + ru(300));
+        c.dst_height = (uint16_t)(1 + ru(300));
+        c.dst_w = ru(8) ? c.dst_width : (uint16_t)(1 + ru(65535));
+        c.dst_h = ru(8) ? c.dst_height : (uint16_t)(1 + ru(65535));
+        c.filter = (epi_filter_t)ru(4);
+        c.max_src_pixels = UINT32_MAX;
+        const bool huge = ru(16) == 0; /* a ring of rows that can pass 4 GiB: unaddressable on a 32-bit target */
+        if (huge) {
+            c.src_width = 65535;
+            c.src_height = 65535;
+            c.dst_width = 65535;
+            c.dst_w = 65535;
+            c.dst_h = (uint16_t)(1 + ru(2));
+        }
+        rsrc_axis(c.src_width, &c.src.x, &c.src.w);
+        rsrc_axis(c.src_height, &c.src.y, &c.src.h);
+        if (huge && ru(2)) {
+            c.src = (epi_rect_t){0.0f, 0.0f, 65535.0f, 65535.0f};
+        }
+        const bool valid = rect_rule(c.src, c.src_width, c.src_height);
+        const size_t need = epi_resampler_workspace_size(&c);
+#define RECT_CHECK(cond, what)                                                                                         \
+    CHECK(                                                                                                             \
+        cond,                                                                                                          \
+        what " (%s rect %a,%a,%a,%a in %ux%u, size %zu) [seed=%llu iteration=%d]",                                     \
+        valid ? "valid" : "invalid",                                                                                   \
+        (double)c.src.x,                                                                                               \
+        (double)c.src.y,                                                                                               \
+        (double)c.src.w,                                                                                               \
+        (double)c.src.h,                                                                                               \
+        (unsigned)c.src_width,                                                                                         \
+        (unsigned)c.src_height,                                                                                        \
+        need,                                                                                                          \
+        (unsigned long long)seed_arg,                                                                                  \
+        it                                                                                                             \
+    )
+        if (!valid || need == 0) {
+            RECT_CHECK(need == 0, "an invalid rect was sized");
+            RECT_CHECK(valid ? SIZE_MAX <= UINT32_MAX : true, "a valid rect got size 0 on a 64-bit target");
+            uint64_t dummy[2];
+            epi_resampler_t* r = (epi_resampler_t*)(void*)dummy; /* non-NULL sentinel */
+            const epi_err_t e = epi_resampler_init(&c, dummy, sizeof dummy, &r);
+            RECT_CHECK(e == EPI_ERR_INVALID_ARG && r == NULL, "a rect with size 0 was not invalid");
+            if (valid) {
+                unaddressable++;
+            } else {
+                invalid++;
+            }
+            continue;
+        }
+        if (need > (64u << 20)) {
+            skipped++;
+            continue;
+        }
+        const unsigned mis = ru(8);
+        uint8_t* raw = malloc(need + mis);
+        CHECK(raw != NULL, "out of memory");
+        epi_resampler_t* r = NULL;
+        RECT_CHECK(
+            epi_resampler_init(&c, raw + mis, need - 1, &r) == EPI_ERR_WORKSPACE_TOO_SMALL,
+            "init accepted a workspace one byte short"
+        );
+        RECT_CHECK(epi_resampler_init(&c, raw + mis, need, &r) == EPI_OK, "init failed with the reported size");
+#undef RECT_CHECK
+        if ((uint64_t)c.src_width * c.src_height > (1u << 20)) { /* the coefficients alone */
+            free(raw);
+            init_only++;
+            continue;
+        }
+        epi_rgb_t* in = malloc((size_t)c.src_width * sizeof *in);
+        epi_rgb_t* out = malloc((size_t)c.dst_width * sizeof *out);
+        CHECK(in != NULL && out != NULL, "out of memory");
+        uint32_t got = 0;
+        for (uint32_t y = 0; y < c.src_height; y++) {
+            for (uint32_t x = 0; x < c.src_width; x++) {
+                in[x] = (epi_rgb_t){(uint8_t)rnd(), (uint8_t)rnd(), (uint8_t)rnd()};
+            }
+            CHECK(epi_resampler_push(r, in) == EPI_OK, "push of row %u failed", (unsigned)y);
+            while (epi_resampler_pop(r, out) == EPI_OK) {
+                got++;
+            }
+        }
+        CHECK(
+            got == c.dst_height,
+            "resampler emitted %u rows, want %u [seed=%llu iteration=%d]",
+            (unsigned)got,
+            (unsigned)c.dst_height,
+            (unsigned long long)seed_arg,
+            it
+        );
+        rows += got;
+        free(in);
+        free(out);
+        free(raw);
+        ok++;
+    }
+    if (iters >= 1000) {
+        CHECK(
+            ok > 0 && invalid > 0 && (SIZE_MAX > UINT32_MAX || unaddressable > 0),
+            "rects: ok=%ld invalid=%ld unaddressable=%ld [seed=%llu]",
+            ok,
+            invalid,
+            unaddressable,
+            (unsigned long long)seed_arg
+        );
+    }
+    printf(
+        "rects: ok=%ld invalid=%ld unaddressable=%ld init-only=%ld skipped=%ld rows=%ld\n",
+        ok,
+        invalid,
+        unaddressable,
+        init_only,
+        skipped,
+        rows
+    );
+}
+
+/* The neutral knot rule (epi_neutral_knot_t, epi_colour_panel_config_t),
+ * restated as the oracle. */
+static bool knot_rule(const epi_neutral_knot_t* k, size_t n) {
+    if (n > 16 || (k == NULL) != (n == 0)) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (!(k[i].lstar >= 0.0f && k[i].lstar <= 100.0f && k[i].a >= -30.0f && k[i].a <= 30.0f && k[i].b >= -30.0f &&
+              k[i].b <= 30.0f) ||
+            (i > 0 && !(k[i].lstar > k[i - 1].lstar))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* 0 to 17 knots, mostly ascending in L* with offsets at or inside ±30;
+ * sometimes a field out of range (NaN and infinities included), two knots
+ * swapped, a repeated L*, or the pointer and the count disagreeing. */
+static size_t rand_knots(epi_neutral_knot_t* k, const epi_neutral_knot_t** out) {
+    static const float odd[] = {
+        NAN, INFINITY, -INFINITY, -FLT_TRUE_MIN, -0.0f, 100.0f, 100.00001f, 30.000002f, FLT_MAX
+    };
+    const size_t n = ru(18);
+    float l = ru(2) ? 0.0f : rf01() * 20.0f;
+    for (size_t i = 0; i < n; i++) {
+        if (i > 0) {
+            l += ru(32) == 0 ? FLT_MIN : rf01() * (100.0f / (float)n); /* FLT_MIN repeats an L* above 0 */
+        }
+        l = l > 100.0f ? 100.0f : l;
+        k[i].lstar = l;
+        k[i].a = ru(3) ? (ru(2) ? 30.0f : -30.0f) : rf01() * 60.0f - 30.0f;
+        k[i].b = ru(3) ? (ru(2) ? 30.0f : -30.0f) : rf01() * 60.0f - 30.0f;
+    }
+    if (n > 0 && ru(4) == 0) {
+        const float v = ru(2) ? odd[ru(sizeof odd / sizeof odd[0])] : -odd[ru(sizeof odd / sizeof odd[0])];
+        epi_neutral_knot_t* bad = &k[ru((uint32_t)n)];
+        switch (ru(3)) {
+        case 0:
+            bad->lstar = v;
+            break;
+        case 1:
+            bad->a = v;
+            break;
+        default:
+            bad->b = v;
+            break;
+        }
+    }
+    if (n > 1 && ru(8) == 0) {
+        const size_t i = ru((uint32_t)n - 1u);
+        const epi_neutral_knot_t t = k[i];
+        k[i] = k[i + 1];
+        k[i + 1] = t;
+    }
+    *out = (n == 0) == (ru(16) != 0) ? NULL : k;
+    return n;
+}
+
+/* Random neutral-cast knots on the shipped colour inks: size and init must
+ * follow the knot rule, and an accepted panel converts greys and
+ * near-neutrals, dithered and undithered, and then random rows. */
+static void fuzz_neutral(int iters) {
+    long ok = 0, rejected = 0, rows = 0;
+    for (int it = 0; it < iters; it++) {
+        epi_neutral_knot_t knots[17];
+        epi_colour_panel_config_t g;
+        memset(&g, 0, sizeof g);
+        g.name = "n";
+        g.width = 100;
+        g.height = 100;
+        g.inks = epi_panel_el133uf1.inks;
+        g.ink_count = epi_panel_el133uf1.ink_count;
+        g.detail_sigma = 0.3f + rf01() * 10.0f;
+        g.neutral_count = rand_knots(knots, &g.neutral);
+        const bool valid = knot_rule(g.neutral, g.neutral_count);
+        const size_t need = epi_colour_panel_size(&g);
+        CHECK(
+            (need != 0) == valid,
+            "%s knots (%zu, %s) got size %zu [seed=%llu iteration=%d]",
+            valid ? "valid" : "invalid",
+            g.neutral_count,
+            g.neutral ? "non-NULL" : "NULL",
+            need,
+            (unsigned long long)seed_arg,
+            it
+        );
+        const epi_panel_t* p = NULL;
+        const char* why = "stale";
+        if (!valid) {
+            uint64_t dummy[2];
+            const epi_err_t e = epi_colour_panel_init(&g, dummy, sizeof dummy, &p, &why);
+            CHECK(
+                e == EPI_ERR_INVALID_ARG && p == NULL && why != NULL && why[0] != '\0',
+                "invalid knots gave %s [seed=%llu iteration=%d]",
+                epi_strerror(e),
+                (unsigned long long)seed_arg,
+                it
+            );
+            rejected++;
+            continue;
+        }
+        const unsigned mis = ru(32);
+        uint8_t* store = malloc(need + mis);
+        CHECK(store != NULL, "out of memory");
+        const epi_err_t e = epi_colour_panel_init(&g, store + mis, need, &p, &why);
+        CHECK(
+            e == EPI_OK && p != NULL && why == NULL,
+            "valid knots on the shipped inks gave %s (%s) [seed=%llu iteration=%d]",
+            epi_strerror(e),
+            why ? why : "",
+            (unsigned long long)seed_arg,
+            it
+        );
+        ok++;
+        /* Greys and near-neutrals dithered and undithered, then random rows,
+         * whose chroma runs through the fade of the offsets. */
+        for (int conv = 0; conv < 3; conv++) {
+            rows += convert_small(p, conv == 1, conv < 2, it);
+        }
+        free(store);
+    }
+    if (iters >= 40) {
+        CHECK(
+            ok > 0 && rejected > 0,
+            "neutral: ok=%ld rejected=%ld [seed=%llu]",
+            ok,
+            rejected,
+            (unsigned long long)seed_arg
+        );
+    }
+    printf("neutral: accepted=%ld rejected=%ld rows=%ld\n", ok, rejected, rows);
+}
+
 int main(int argc, char** argv) {
     int n = argc > 1 ? atoi(argv[1]) : 3000;
     if (argc > 2) {
@@ -1124,6 +1439,10 @@ int main(int argc, char** argv) {
     fuzz_converter(n / 3);
     fuzz_preview(n / 3);
     fuzz_pack(n / 3);
-    fuzz_colour(argc > 3 ? atoi(argv[3]) : n / 100);
+    const int colour_iters = argc > 3 ? atoi(argv[3]) : n / 100;
+    fuzz_colour(colour_iters);
+    /* Last, so that the draws of the passes above don't depend on them. */
+    fuzz_rects(n / 4);
+    fuzz_neutral(colour_iters);
     return 0;
 }

@@ -745,7 +745,11 @@ out:
     return rc;
 }
 
-/* The whole file, malloc'd (NULL with errno set on failure). */
+/* The largest input file read. */
+#define MAX_FILE_BYTES ((size_t)512 << 20)
+
+/* The whole file, malloc'd (NULL with errno set on failure: EFBIG if it is
+ * over MAX_FILE_BYTES). */
 static uint8_t* read_file(const char* path, size_t* size) {
     FILE* f = fopen(path, "rb");
     if (!f) {
@@ -754,8 +758,16 @@ static uint8_t* read_file(const char* path, size_t* size) {
     uint8_t* data = NULL;
     size_t n = 0, cap = 0;
     for (;;) {
+        if (n > MAX_FILE_BYTES) {
+            free(data);
+            fclose(f);
+            errno = EFBIG;
+            return NULL;
+        }
         if (n == cap) {
+            /* One byte past the limit, to tell a file at it from one over it. */
             cap = cap ? cap * 2 : (size_t)1 << 20;
+            cap = cap > MAX_FILE_BYTES + 1 ? MAX_FILE_BYTES + 1 : cap;
             uint8_t* grown = realloc(data, cap);
             if (!grown) {
                 free(data);
@@ -801,6 +813,9 @@ int main(int argc, char** argv) {
     size_t file_size = 0;
     uint8_t* file = read_file(o.input, &file_size);
     if (!file) {
+        if (errno == EFBIG) {
+            return fail("%s: larger than %zu MiB", o.input, MAX_FILE_BYTES >> 20);
+        }
         return fail("cannot read %s: %s", o.input, strerror(errno));
     }
     int iw = 0, ih = 0, channels = 0;
