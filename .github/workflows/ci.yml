@@ -146,7 +146,11 @@ jobs:
   # under AddressSanitizer and UBSan in Node.
   emscripten-sanitizers:
     runs-on: ubuntu-latest
-    name: ubuntu-latest / emscripten sanitizers
+    name: ubuntu-latest / emscripten sanitizers (${{ matrix.build_type }})
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
     env:
       SAN_FLAGS: -fsanitize=address,undefined,float-divide-by-zero -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 
@@ -159,7 +163,7 @@ jobs:
       - name: Configure
         run: >
           emcmake cmake -B build-wasm
-          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DEPAPER_IMAGE_BUILD_TESTS=ON
           -DEPAPER_IMAGE_BUILD_TOOLS=OFF
           -DEPAPER_IMAGE_WARNINGS_AS_ERRORS=ON

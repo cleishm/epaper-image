@@ -568,11 +568,13 @@ void test_converter_drain_violation(void) {
     int status = 0;
     TEST_ASSERT_EQUAL_INT(pid, waitpid(pid, &status, 0));
     TEST_ASSERT_TRUE_MESSAGE(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT, "push past the rings did not assert");
-#else
-    TEST_IGNORE_MESSAGE("debug build without fork: the contract assert is not testable here");
 #endif
     free(buf);
     free(img);
+#if !defined(NDEBUG) && !defined(HAVE_DEATH_TEST)
+    /* After the frees: the ignore leaves the test at once. */
+    TEST_IGNORE_MESSAGE("debug build without fork: the contract assert is not testable here");
+#endif
 }
 
 /*
