@@ -1304,9 +1304,9 @@ that alignment minus one byte of slack so any start address works:
 
 The size depends on the panel (through r and the kind) and the width, not
 the height. On a host where that alignment is 8 bytes: the EL133UF1 (r = 18)
-needs 257,911 B at W = 1600, of which the blurred-L\* ring is 118,400 B and
-the source ring 91,200 B, and 195,111 B at W = 1200; the GDEY075T7 (r = 15)
-needs 89,895 B at W = 800. On ESP32 this normally goes in PSRAM.
+needs 258,095 B at W = 1600, of which the blurred-L\* ring is 118,400 B and
+the source ring 91,200 B, and 195,295 B at W = 1200; the GDEY075T7 (r = 15)
+needs 90,079 B at W = 800. On ESP32 this normally goes in PSRAM.
 
 ### Resampler streaming
 
@@ -1446,6 +1446,11 @@ ink codes: a draft, typically rendered at a reduced size, whose look predicts
 the full render. It runs every stage but S7 and shows, at each pixel, the colour
 the dither aims for, S6's target. Dithering at the draft's size would give
 coarser dots than the panel's; the target needs no dots at all.
+
+S2's σ stays in panel pixels, so at a reduced size the base blurs a larger
+share of the image. Scaling σ with the draft's size moved the draft by under
+0.2 ΔE against the full render, at half and quarter size on all three built-in
+calibrations, so the converter keeps one kernel per panel.
 
 The error diffusion aims to reproduce the target on average, and the measured
 preview's linear-light mean shows what it reaches. The two differ where the

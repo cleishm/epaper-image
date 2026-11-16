@@ -188,8 +188,10 @@ rows straight to the converter.
 A preview is a separate step from conversion. The converter gives ink codes, and
 both the preview and the frame come from those codes, so an app that shows a
 preview on an LCD and sends the frame to the device needs to convert only once.
-As each row of codes pops, push it to `epi_preview_*` and pack it with
-`epi_pack_row`, as in this outline:
+For a quick draft at a reduced size, pop with `epi_converter_pop_undithered`
+instead: it gives the colours the dither aims for, with no dots. As each row of
+codes pops, push it to `epi_preview_*` and pack it with `epi_pack_row`, as in
+this outline:
 
 ```c
 epi_config_t ccfg = {

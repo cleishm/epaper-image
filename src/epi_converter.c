@@ -38,7 +38,7 @@ enum { POP_ANY, POP_CODES, POP_COLOURS };
 
 struct epi_converter {
     const epi_panel_tables_t* tables;
-    const epi_ink_t* inks; /* the panel's, for the undithered grey colours */
+    int32_t ink_lin[EPI_MAX_INKS][3]; /* measured, linear Q16: undithered grey colours */
     uint16_t width, height;
     uint32_t pushed; /* input rows accepted */
     uint32_t popped; /* output rows written */
@@ -177,11 +177,14 @@ epi_err_t epi_converter_init(const epi_config_t* cfg, void* workspace, size_t si
     c->source = mem;
 
     c->tables = p->tables;
-    c->inks = p->inks;
     c->width = cfg->width;
     c->height = cfg->height;
     for (size_t i = 0; i < p->ink_count; i++) {
         c->code[i] = p->inks[i].code;
+        const epi_rgb_t m = p->inks[i].measured;
+        c->ink_lin[i][0] = (int32_t)epi_srgb_to_lin_q16[m.r];
+        c->ink_lin[i][1] = (int32_t)epi_srgb_to_lin_q16[m.g];
+        c->ink_lin[i][2] = (int32_t)epi_srgb_to_lin_q16[m.b];
     }
     epi_dither_init(&c->dither, p->tables, cfg->width, err_mem);
 
@@ -286,10 +289,10 @@ static epi_rgb_t grey_colour(const epi_converter_t* c, const epi_grey_tables_t* 
     const int32_t tp = epi_dither_grey_toe(&c->dither, t);
     int64_t lin[3];
     if (tp <= tb->level_y[0] || tp >= tb->level_y[n - 1]) {
-        const epi_rgb_t m = c->inks[tp <= tb->level_y[0] ? 0 : n - 1].measured;
-        lin[0] = epi_srgb_to_lin_q16[m.r];
-        lin[1] = epi_srgb_to_lin_q16[m.g];
-        lin[2] = epi_srgb_to_lin_q16[m.b];
+        const int32_t* l = c->ink_lin[tp <= tb->level_y[0] ? 0 : n - 1];
+        lin[0] = l[0];
+        lin[1] = l[1];
+        lin[2] = l[2];
     } else {
         unsigned g = 0;
         while (g + 2 < n && tp >= tb->level_y[g + 1]) {
@@ -297,10 +300,8 @@ static epi_rgb_t grey_colour(const epi_converter_t* c, const epi_grey_tables_t* 
         }
         const int64_t gap = tb->level_y[g + 1] - tb->level_y[g];
         const int64_t k = tp - tb->level_y[g]; /* coverage k / gap of level g + 1 */
-        const epi_rgb_t m0 = c->inks[g].measured, m1 = c->inks[g + 1].measured;
-        const uint8_t a0[3] = {m0.r, m0.g, m0.b}, a1[3] = {m1.r, m1.g, m1.b};
         for (int ch = 0; ch < 3; ch++) {
-            const int64_t l0 = epi_srgb_to_lin_q16[a0[ch]], l1 = epi_srgb_to_lin_q16[a1[ch]];
+            const int64_t l0 = c->ink_lin[g][ch], l1 = c->ink_lin[g + 1][ch];
             lin[ch] = (l0 * (gap - k) + l1 * k + gap / 2) / gap;
         }
     }
