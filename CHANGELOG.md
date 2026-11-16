@@ -3,6 +3,37 @@
 All notable changes to **epaper-image** are documented in this file. The project
 follows [semantic versioning](https://semver.org/).
 
+## v0.5.0
+
+Lays out a chosen region of the source, adds an undithered pop for quick
+drafts, and documents rendering a frame in steps. The layout helpers and the
+resampler's source rectangle change, which breaks the API.
+
+**Panel output:** unchanged.
+
+### Breaking changes
+
+- `epi_resampler_config_t`'s `src_x`, `src_y`, `src_w` and `src_h` become one
+  field, `src`, an `epi_rect_t`.
+- `epi_layout_cover(cfg, region)` and `epi_layout_fit(cfg, region)` take the
+  region of the source to lay out, `NULL` for the whole source as before, and
+  return `epi_err_t`. They return `EPI_ERR_INVALID_ARG`, leaving the config
+  untouched, for invalid input or a result that breaks the rectangle rule.
+
+### Added
+
+- `epi_rect_t`, a rectangle in source pixels, for regions and the resampler's
+  source.
+- `epi_converter_pop_undithered` pops a row as sRGB8 colours instead of ink
+  codes: the colour the dither aims for, in the panel's measured ink colours.
+  Rendered this way at a reduced size, a draft predicts the full render's
+  preview without the coarser dither grain. A converter pops with one function,
+  fixed by its first successful pop.
+- The design notes describe rendering in steps: each push and pop does about a
+  row's work, and the output does not depend on how the calls are scheduled.
+- `convert` rejects an image over 65535 pixels a side while decoding it, and an
+  input file over 512 MiB.
+
 ## v0.4.0
 
 Adds `epi_panel_preset`, which finds a panel's preset by name. The API is
