@@ -828,9 +828,12 @@ void test_preview_drain_violation(void) {
     (void)a;
     (void)b;
     (void)p;
-    TEST_IGNORE_MESSAGE("debug build without fork: the contract assert is not testable here");
 #endif
     free(ws);
+#if !defined(NDEBUG) && !defined(HAVE_DEATH_TEST)
+    /* After the frees: the ignore leaves the test at once. */
+    TEST_IGNORE_MESSAGE("debug build without fork: the contract assert is not testable here");
+#endif
 }
 
 /* Any start address and any prior contents give the same output, within the

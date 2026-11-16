@@ -142,6 +142,42 @@ jobs:
       - name: Test
         run: ctest --test-dir build-wasm --output-on-failure
 
+  # The suite and the fuzz harness on a 32-bit target, where size_t is 32 bits,
+  # under AddressSanitizer and UBSan in Node.
+  emscripten-sanitizers:
+    runs-on: ubuntu-latest
+    name: ubuntu-latest / emscripten sanitizers (${{ matrix.build_type }})
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Debug, Release]
+    env:
+      SAN_FLAGS: -fsanitize=address,undefined,float-divide-by-zero -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v16
+
+      - name: Configure
+        run: >
+          emcmake cmake -B build-wasm
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DEPAPER_IMAGE_BUILD_TESTS=ON
+          -DEPAPER_IMAGE_BUILD_TOOLS=OFF
+          -DEPAPER_IMAGE_WARNINGS_AS_ERRORS=ON
+          -DEPAPER_IMAGE_BUILD_FUZZ=ON
+          -DCMAKE_C_FLAGS="$SAN_FLAGS"
+          -DCMAKE_CXX_FLAGS="$SAN_FLAGS"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined -sALLOW_MEMORY_GROWTH=1"
+
+      - name: Build
+        run: cmake --build build-wasm
+
+      - name: Test
+        run: ctest --test-dir build-wasm --output-on-failure
+
   # The host suite on ESP32 targets under QEMU (tests/esp_idf/README.md); the
   # fingerprint and golden tests check that their output is byte-identical too.
   esp-idf-qemu:
@@ -236,7 +272,7 @@ jobs:
   # editing the ruleset.
   all-checks:
     if: always()
-    needs: [format, build, sanitizers, emscripten, esp-idf-qemu, panelgen, panel]
+    needs: [format, build, sanitizers, emscripten, emscripten-sanitizers, esp-idf-qemu, panelgen, panel]
     runs-on: ubuntu-latest
     steps:
       - name: Check that every required job succeeded

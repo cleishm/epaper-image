@@ -564,8 +564,9 @@ typedef struct {
 typedef struct epi_resampler epi_resampler_t;
 
 /**
- * @brief Workspace bytes needed for @p cfg, or 0 if @p cfg is invalid or the
- *        source is too large (see #epi_resampler_config_t).
+ * @brief Workspace bytes needed for @p cfg, or 0 if @p cfg is invalid, the
+ *        source is too large (see #epi_resampler_config_t) or the workspace
+ *        can't be addressed (over SIZE_MAX, possible on a 32-bit target).
  *
  * Covers the horizontal coefficient table (each visible column's taps), a ring
  * of resampled rows as tall as the largest vertical window, a scratch array
@@ -589,8 +590,17 @@ size_t epi_resampler_workspace_size(const epi_resampler_config_t* cfg);
 /**
  * @brief Initialise a resampler in caller-provided memory.
  *
+ * Init builds the horizontal coefficients in one call, with no progress
+ * callback; its time grows with the horizontal taps, about the visible output
+ * width × the filter's support scaled by the reduction (LANCZOS3 takes two
+ * sines per tap), so a very wide source against a normal output costs most. On
+ * a slow target, bound src_width before init, by a check of your own or, for
+ * the area, with @c max_src_pixels.
+ *
  * @return EPI_OK; EPI_ERR_INVALID_ARG if @p cfg is invalid (see
- *         #epi_resampler_config_t) or a pointer is NULL;
+ *         #epi_resampler_config_t), a pointer is NULL, or the workspace can't
+ *         be addressed (over SIZE_MAX, possible on a 32-bit target, where
+ *         epi_resampler_workspace_size() gives 0);
  *         EPI_ERR_SOURCE_TOO_LARGE if the source is over the limit;
  *         EPI_ERR_WORKSPACE_TOO_SMALL if @p size is below
  *         epi_resampler_workspace_size(). @p *out is NULL on error.
