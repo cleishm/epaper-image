@@ -54,13 +54,19 @@ static inline uint32_t f_bits(float f) {
     return u;
 }
 
-static inline uint64_t fnv1a64(const uint8_t* p, size_t n) {
-    uint64_t h = UINT64_C(0xcbf29ce484222325);
+#define FNV1A64_INIT UINT64_C(0xcbf29ce484222325)
+
+/* FNV-1a 64 of p[0..n) continued from h (start from FNV1A64_INIT). */
+static inline uint64_t fnv1a64_update(uint64_t h, const uint8_t* p, size_t n) {
     for (size_t i = 0; i < n; i++) {
         h ^= p[i];
         h *= UINT64_C(0x100000001b3);
     }
     return h;
+}
+
+static inline uint64_t fnv1a64(const uint8_t* p, size_t n) {
+    return fnv1a64_update(FNV1A64_INIT, p, n);
 }
 
 /* ---- deterministic inputs ------------------------------------------------ */
@@ -151,27 +157,45 @@ static inline epi_err_t layout(uint8_t which, epi_resampler_config_t* c, const e
     return which == 1 ? epi_layout_cover(c, region) : epi_layout_fit(c, region);
 }
 
-/* Streams img through a converter in ws (size bytes), popping until not OK
- * after every push and checking the lag (rows out = max(0, y − r + 1), all
- * after the last push). out receives H rows of W ink codes.
+/* A pop of either kind, for the runners: ink codes or undithered colours. */
+typedef epi_err_t (*converter_pop_fn)(epi_converter_t* c, void* row);
+
+static inline epi_err_t pop_codes(epi_converter_t* c, void* row) {
+    return epi_converter_pop(c, row);
+}
+
+static inline epi_err_t pop_undithered(epi_converter_t* c, void* row) {
+    return epi_converter_pop_undithered(c, row);
+}
+
+/* Streams img through a converter in ws (size bytes), popping with pop until
+ * not OK after every push and checking the lag (rows out = max(0, y − r + 1),
+ * all after the last push). out receives H rows of row_size bytes.
  * first_ready (optional) is the input row after whose push the first output
  * row appeared. Returns the number of rows popped. */
-static inline int
-run_converter_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t size, uint8_t* out, int* first_ready) {
+static inline int run_rows_in(
+    const epi_config_t* cfg,
+    const epi_rgb_t* img,
+    void* ws,
+    size_t size,
+    converter_pop_fn pop,
+    size_t row_size,
+    void* out,
+    int* first_ready
+) {
     epi_converter_t* c = NULL;
     TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_init(cfg, ws, size, &c));
     TEST_ASSERT_NOT_NULL(c);
-    const size_t rs = cfg->width;
     const int r = cfg->panel->tables->kernel_radius, h = cfg->height;
     int n = 0;
     if (first_ready != NULL) {
         *first_ready = -1;
     }
-    uint8_t* spare = xmalloc(rs);
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop(c, spare)); /* before any push */
+    void* spare = xmalloc(row_size);
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, pop(c, spare)); /* before any push */
     for (int y = 0; y < h; y++) {
         TEST_ASSERT_EQUAL_INT(EPI_OK, epi_converter_push(c, img + (size_t)y * cfg->width));
-        while (n < h && epi_converter_pop(c, out + (size_t)n * rs) == EPI_OK) {
+        while (n < h && pop(c, (uint8_t*)out + (size_t)n * row_size) == EPI_OK) {
             if (n == 0 && first_ready != NULL) {
                 *first_ready = y;
             }
@@ -180,24 +204,42 @@ run_converter_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t
         int expect = y == h - 1 ? h : (y >= r ? y - r + 1 : 0);
         TEST_ASSERT_EQUAL_INT(expect, n);
         if (n < h) {
-            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, epi_converter_pop(c, spare));
+            TEST_ASSERT_EQUAL_INT(EPI_ERR_NOT_READY, pop(c, spare));
         }
     }
     /* Nothing more: further pops and pushes are finished. */
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop(c, spare));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, pop(c, spare));
     TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_push(c, img));
-    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, epi_converter_pop(c, spare));
+    TEST_ASSERT_EQUAL_INT(EPI_ERR_FINISHED, pop(c, spare));
     free(spare);
     return n;
 }
 
-static inline int run_converter(const epi_config_t* cfg, const epi_rgb_t* img, uint8_t* out, int* first_ready) {
+/* run_rows_in in a workspace of its own. */
+static inline int run_rows(
+    const epi_config_t* cfg,
+    const epi_rgb_t* img,
+    converter_pop_fn pop,
+    size_t row_size,
+    void* out,
+    int* first_ready
+) {
     size_t size = epi_converter_workspace_size(cfg);
     TEST_ASSERT_NOT_EQUAL(0, size);
     void* ws = xmalloc(size);
-    int n = run_converter_in(cfg, img, ws, size, out, first_ready);
+    int n = run_rows_in(cfg, img, ws, size, pop, row_size, out, first_ready);
     free(ws);
     return n;
+}
+
+/* run_rows(_in) with epi_converter_pop: out receives H rows of W ink codes. */
+static inline int
+run_converter_in(const epi_config_t* cfg, const epi_rgb_t* img, void* ws, size_t size, uint8_t* out, int* first_ready) {
+    return run_rows_in(cfg, img, ws, size, pop_codes, cfg->width, out, first_ready);
+}
+
+static inline int run_converter(const epi_config_t* cfg, const epi_rgb_t* img, uint8_t* out, int* first_ready) {
+    return run_rows(cfg, img, pop_codes, cfg->width, out, first_ready);
 }
 
 /* A run in a zeroed workspace is the reference; runs in workspaces

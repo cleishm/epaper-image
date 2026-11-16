@@ -14,8 +14,9 @@
  * run the same way on random sizes and codes, including codes they must reject.
  * Random colour ink sets, plausible and extreme, go through
  * epi_colour_panel_init, and each panel it accepts converts a small image with
- * random intents: init must only accept what the converter can run without
- * undefined behaviour.
+ * random intents, the last undithered: init must only accept what the
+ * converter can run without undefined behaviour. Converters pop with
+ * epi_converter_pop or epi_converter_pop_undithered, and must refuse the other.
  *
  * Every check exits nonzero with a message in every build type; the
  * sanitizers report the memory and undefined-behaviour errors.
@@ -593,7 +594,21 @@ static const epi_panel_t* rand_grey(uint8_t* store, size_t cap) {
 }
 
 static long cv_ok;
+static long cv_undithered;
 static long grey_rand;
+
+/* The next row by the chosen pop into out (codes or colours, width × 3 bytes);
+ * once a row has come out, the other pop must be rejected. */
+static epi_err_t pop_either(epi_converter_t* cv, bool undithered, uint8_t* out, uint32_t got) {
+    if (got > 0) {
+        CHECK(
+            (undithered ? epi_converter_pop(cv, out) : epi_converter_pop_undithered(cv, (epi_rgb_t*)out)) ==
+                EPI_ERR_INVALID_ARG,
+            "the other pop was accepted"
+        );
+    }
+    return undithered ? epi_converter_pop_undithered(cv, (epi_rgb_t*)out) : epi_converter_pop(cv, out);
+}
 
 static void fuzz_converter(int iters) {
     static uint8_t store[1 << 16];
@@ -637,7 +652,8 @@ static void fuzz_converter(int iters) {
         );
         epi_err_t e = epi_converter_init(&c, raw + mis, need, &cv);
         CHECK(e == EPI_OK, "converter init: %s", epi_strerror(e));
-        uint8_t* out = malloc(c.width);
+        const bool undithered = ru(2) == 0;
+        uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
         epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
         CHECK(out != NULL && row != NULL, "out of memory");
         int mode = (int)ru(8);
@@ -648,7 +664,7 @@ static void fuzz_converter(int iters) {
             }
             fill(row, c.width, mode, y);
             CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
-            while (epi_converter_pop(cv, out) == EPI_OK) {
+            while (pop_either(cv, undithered, out, got) == EPI_OK) {
                 got++;
             }
         }
@@ -657,8 +673,9 @@ static void fuzz_converter(int iters) {
         free(row);
         free(raw);
         cv_ok++;
+        cv_undithered += undithered;
     }
-    printf("converter: ok=%ld (random grey %ld)\n", cv_ok, grey_rand);
+    printf("converter: ok=%ld (random grey %ld, undithered %ld)\n", cv_ok, grey_rand, cv_undithered);
 }
 
 /* A built-in panel, or sometimes a random grey one (codes 0..level_count - 1). */
@@ -1050,8 +1067,9 @@ static void fuzz_colour(int iters) {
                 (unsigned long long)seed_arg,
                 it
             );
+            const bool undithered = conv == 2;
             uint8_t* raw = malloc(cneed);
-            uint8_t* out = malloc(c.width);
+            uint8_t* out = malloc((size_t)c.width * sizeof(epi_rgb_t));
             epi_rgb_t* row = malloc((size_t)c.width * sizeof *row);
             CHECK(raw != NULL && out != NULL && row != NULL, "out of memory");
             epi_converter_t* cv = NULL;
@@ -1064,15 +1082,17 @@ static void fuzz_colour(int iters) {
                 }
                 fill(row, c.width, mode, y);
                 CHECK(epi_converter_push(cv, row) == EPI_OK, "push of row %u failed", (unsigned)y);
-                while (epi_converter_pop(cv, out) == EPI_OK) {
+                while (pop_either(cv, undithered, out, got) == EPI_OK) {
                     got++;
                     rows++;
-                    for (uint32_t x = 0; x < c.width; x++) {
-                        size_t i = 0;
-                        while (i < p->ink_count && p->inks[i].code != out[x]) {
-                            i++;
+                    if (!undithered) {
+                        for (uint32_t x = 0; x < c.width; x++) {
+                            size_t i = 0;
+                            while (i < p->ink_count && p->inks[i].code != out[x]) {
+                                i++;
+                            }
+                            CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
                         }
-                        CHECK(i < p->ink_count, "code %u is not an ink", (unsigned)out[x]);
                     }
                 }
             }

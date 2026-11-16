@@ -26,6 +26,7 @@
 #include "epi_intent.h"
 #include "epi_math.h"
 #include "epi_panel_tables.h"
+#include "epi_srgb.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -34,11 +35,13 @@
 
 struct epi_converter {
     const epi_panel_tables_t* tables;
+    int32_t ink_lin[EPI_MAX_INKS][3]; /* grey: the levels' measured colours, linear Q16 */
     uint16_t width, height;
     uint32_t pushed; /* input rows accepted */
     uint32_t popped; /* output rows written */
     uint8_t code[EPI_MAX_INKS];
-    void* target; /* colour: int32_t[W][3]; grey: int32_t[W] */
+    bool undithered; /* which pop the rows came from, once popped > 0 */
+    void* target;    /* colour: int32_t[W][3]; grey: int32_t[W] */
     int16_t* hblur;
     int16_t* scratch;
     void* source; /* colour: epi_rgb_t rows; grey: int16_t rows of L*src */
@@ -175,6 +178,12 @@ epi_err_t epi_converter_init(const epi_config_t* cfg, void* workspace, size_t si
     c->height = cfg->height;
     for (size_t i = 0; i < p->ink_count; i++) {
         c->code[i] = p->inks[i].code;
+        if (p->tables->kind == EPI_PANEL_GREY) {
+            const epi_rgb_t m = p->inks[i].measured;
+            c->ink_lin[i][0] = (int32_t)epi_srgb_to_lin_q16[m.r];
+            c->ink_lin[i][1] = (int32_t)epi_srgb_to_lin_q16[m.g];
+            c->ink_lin[i][2] = (int32_t)epi_srgb_to_lin_q16[m.b];
+        }
     }
     epi_dither_init(&c->dither, p->tables, cfg->width, err_mem);
 
@@ -218,10 +227,9 @@ static void indices_to_codes(const epi_converter_t* c, uint8_t* row) {
     }
 }
 
-epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
-    if (c == NULL || out_row == NULL) {
-        return EPI_ERR_INVALID_ARG;
-    }
+/* S2's vertical pass, S1 (colour) and S3–S6 for the next output row, into
+ * c->target; EPI_OK, or why the row cannot be made yet. */
+static epi_err_t next_target(epi_converter_t* c) {
     if (c->popped >= c->height) {
         return EPI_ERR_FINISHED;
     }
@@ -243,12 +251,81 @@ epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
     const size_t slot = (size_t)(c->popped % (uint32_t)(r + 1)) * w;
     if (c->tables->kind == EPI_PANEL_GREY) {
         epi_intent_grey_row(&c->intent, (int16_t*)c->source + slot, c->scratch, c->target, c->width);
-        epi_dither_grey_row(&c->dither, c->target, out_row);
     } else {
         epi_intent_row(&c->intent, (epi_rgb_t*)c->source + slot, c->scratch, c->target, c->width);
+    }
+    return EPI_OK;
+}
+
+epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row) {
+    if (c == NULL || out_row == NULL || (c->popped > 0 && c->undithered)) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    const epi_err_t e = next_target(c);
+    if (e != EPI_OK) {
+        return e;
+    }
+    if (c->tables->kind == EPI_PANEL_GREY) {
+        epi_dither_grey_row(&c->dither, c->target, out_row);
+    } else {
         epi_dither_row(&c->dither, c->target, out_row);
     }
     indices_to_codes(c, out_row);
+    c->popped++;
+    return EPI_OK;
+}
+
+/* Linear sRGB Q16 to sRGB8 by the preview's rule, after clamping to [0, 1]. */
+static uint8_t lin_to_srgb8(int32_t lin) {
+    return epi_srgb8_from_lin_q16((uint32_t)(lin < 0 ? 0 : lin > EPI_Q16_ONE ? EPI_Q16_ONE : lin));
+}
+
+/* The grey target as a colour: the ditherer's coverage toe, then the two
+ * adjacent levels' measured linear colours mixed by the coverage. */
+static epi_rgb_t grey_colour(const epi_converter_t* c, const epi_grey_tables_t* tb, int32_t t) {
+    const unsigned n = tb->base.ink_count;
+    int32_t tp = epi_dither_grey_toe(&c->dither, t);
+    /* Beyond the end levels the mix gives that level's colour exactly. */
+    tp = tp < tb->level_y[0] ? tb->level_y[0] : tp > tb->level_y[n - 1] ? tb->level_y[n - 1] : tp;
+    unsigned g = 0;
+    while (g + 2 < n && tp >= tb->level_y[g + 1]) {
+        g++;
+    }
+    const int64_t gap = tb->level_y[g + 1] - tb->level_y[g];
+    const int64_t k = tp - tb->level_y[g]; /* coverage k / gap of level g + 1 */
+    uint8_t out[3];
+    for (int ch = 0; ch < 3; ch++) {
+        const int64_t l0 = c->ink_lin[g][ch], l1 = c->ink_lin[g + 1][ch];
+        /* A mix of two values in [0, 1]: no clamp needed. */
+        out[ch] = epi_srgb8_from_lin_q16((uint32_t)((l0 * (gap - k) + l1 * k + gap / 2) / gap));
+    }
+    return (epi_rgb_t){out[0], out[1], out[2]};
+}
+
+epi_err_t epi_converter_pop_undithered(epi_converter_t* c, epi_rgb_t* out_row) {
+    if (c == NULL || out_row == NULL || (c->popped > 0 && !c->undithered)) {
+        return EPI_ERR_INVALID_ARG;
+    }
+    const epi_err_t e = next_target(c);
+    if (e != EPI_OK) {
+        return e;
+    }
+    const size_t w = c->width;
+    if (c->tables->kind == EPI_PANEL_GREY) {
+        const epi_grey_tables_t* tb = epi_grey_tables(c->tables);
+        const int32_t* t = c->target;
+        for (size_t x = 0; x < w; x++) {
+            out_row[x] = grey_colour(c, tb, t[x]);
+        }
+    } else {
+        /* The target is linear sRGB in the inks' own space (an ink's is
+         * epi_srgb_to_lin_q16 of its measured colour). */
+        const int32_t (*t)[3] = c->target;
+        for (size_t x = 0; x < w; x++) {
+            out_row[x] = (epi_rgb_t){lin_to_srgb8(t[x][0]), lin_to_srgb8(t[x][1]), lin_to_srgb8(t[x][2])};
+        }
+    }
+    c->undithered = true;
     c->popped++;
     return EPI_OK;
 }

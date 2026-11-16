@@ -1,8 +1,8 @@
 /*
  * The output of a stage does not depend on when its rows are pushed and
- * popped: the resampler, the converter and the preview reducer give the same
- * bytes for every schedule they accept. The packer works row by row with no
- * state, so it needs no schedule test.
+ * popped: the resampler, the converter (with either pop) and the preview
+ * reducer give the same bytes for every schedule they accept. The packer
+ * works row by row with no state, so it needs no schedule test.
  *
  * Schedules, each run on a stage with the same input:
  * - eager: pop until not OK after every push (the reference);
@@ -37,6 +37,9 @@ static epi_err_t converter_push(void* s, const void* r) {
 }
 static epi_err_t converter_pop(void* s, void* r) {
     return epi_converter_pop(s, r);
+}
+static epi_err_t converter_pop_undithered(void* s, void* r) {
+    return epi_converter_pop_undithered(s, r);
 }
 static epi_err_t preview_push(void* s, const void* r) {
     return epi_preview_push(s, r);
@@ -252,6 +255,17 @@ static void pipeline_case(const epi_panel_t* panel, const epi_intent_t* intent, 
         .out_n = (uint32_t)h
     };
     check_stage(converter_init, &ctx, &s, ref, got);
+
+    /* The undithered rows of the same input. */
+    const size_t urow = (size_t)w * sizeof(epi_rgb_t);
+    uint8_t* uref = xmalloc(urow * h);
+    uint8_t* ugot = xmalloc(urow * h);
+    stage_t u = s;
+    u.pop = converter_pop_undithered;
+    u.out_row = urow;
+    check_stage(converter_init, &ctx, &u, uref, ugot);
+    free(ugot);
+    free(uref);
 
     /* The preview over the reference codes. */
     const size_t prow = (size_t)pcfg.dst_width * sizeof(epi_rgb_t);

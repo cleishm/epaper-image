@@ -118,31 +118,13 @@ static void accumulate(epi_preview_t* p, const uint8_t* codes, uint32_t yover) {
     }
 }
 
-/* The sRGB8 value whose linear value is nearest to lin (at most 65536). An exact
- * midpoint between two values goes to the lower one. */
-static uint8_t nearest_srgb8(uint32_t lin) {
-    unsigned lo = 0, hi = 255; /* the first entry not below lin is in [lo, hi] */
-    while (lo < hi) {
-        const unsigned mid = (lo + hi) / 2;
-        if (epi_srgb_to_lin_q16[mid] < lin) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    if (lo > 0 && lin - epi_srgb_to_lin_q16[lo - 1] <= epi_srgb_to_lin_q16[lo] - lin) {
-        lo--;
-    }
-    return (uint8_t)lo;
-}
-
 /* Turn the sums into the finished row and clear them for the next. A mean exactly
  * halfway between two integers rounds up. */
 static void finish_row(epi_preview_t* p) {
     const uint64_t total = (uint64_t)p->src_width * p->src_height;
     const size_t n = (size_t)p->dst_width * 3;
     for (size_t i = 0; i < n; i++) {
-        p->row[i] = nearest_srgb8((uint32_t)((p->acc[i] + total / 2) / total));
+        p->row[i] = epi_srgb8_from_lin_q16((uint32_t)((p->acc[i] + total / 2) / total));
         p->acc[i] = 0;
     }
     p->filling++;

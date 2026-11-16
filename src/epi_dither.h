@@ -40,6 +40,10 @@ void epi_dither_row(epi_dither_ctx_t* ctx, const int32_t (*target_lin_q16)[3], u
  * per-gap coverage toe (docs/design.md, "Grey panels"). */
 void epi_dither_grey_row(epi_dither_ctx_t* ctx, const int32_t* target_y_q16, uint8_t* idx_out);
 
+/* Grey: the coverage toe of a target Y (Q16), t′ as epi_dither_grey_row uses
+ * it. Also used for the converter's undithered rows. */
+int32_t epi_dither_grey_toe(const epi_dither_ctx_t* ctx, int32_t t);
+
 /* ---- Exported for the host tests (tests/test_dither.c, tests/test_grey.c);
  * not part of the library's interface. ---- */
 
@@ -52,6 +56,5 @@ void epi_dither_fs_split(int32_t e, int32_t parts[4]);
 int32_t epi_dither_grey_cutl(int32_t t);
 int32_t epi_dither_grey_toe_q16(int32_t c);
 int32_t epi_dither_grey_toe_full(const epi_grey_tables_t* tb, int32_t t);
-int32_t epi_dither_grey_toe(const epi_dither_ctx_t* ctx, int32_t t);
 
 #endif /* EPI_DITHER_H */

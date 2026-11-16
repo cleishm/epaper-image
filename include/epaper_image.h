@@ -425,7 +425,8 @@ epi_err_t epi_converter_init(const epi_config_t* cfg, void* workspace, size_t si
  * EL133UF1): output row y is ready once input row min(y + r, height − 1)
  * has been pushed, so pushing the last row releases all remaining rows.
  *
- * Contract: call epi_converter_pop() until it returns EPI_ERR_NOT_READY (or
+ * Contract: call epi_converter_pop() (or epi_converter_pop_undithered(),
+ * whichever this converter pops with) until it returns EPI_ERR_NOT_READY (or
  * EPI_ERR_FINISHED) after every push. A push the converter cannot hold
  * because earlier rows were not drained is a programming error: it asserts
  * in debug builds and is rejected (no memory is touched, push returns
@@ -446,10 +447,35 @@ epi_err_t epi_converter_push(epi_converter_t* c, const epi_rgb_t* row);
  * epi_preview_push() for a preview and to epi_pack_row() for the panel.
  *
  * @return EPI_OK if a row was written; EPI_ERR_INVALID_ARG for a NULL
- *         argument; EPI_ERR_FINISHED if all @c height rows have been popped;
+ *         argument, or after epi_converter_pop_undithered() has written a row
+ *         (a converter pops with one function, which then changes nothing);
+ *         EPI_ERR_FINISHED if all @c height rows have been popped;
  *         EPI_ERR_NOT_READY if none is ready yet.
  */
 epi_err_t epi_converter_pop(epi_converter_t* c, uint8_t* out_row);
+
+/**
+ * @brief Pop the next output row as colours, without dithering, if one is
+ *        ready.
+ *
+ * A quick draft of the render, for example at a reduced size: each pixel is
+ * the colour the dither aims for, in the panel's measured ink colours, which
+ * is close to what epi_preview_push() and epi_preview_pop() show for a dither
+ * of the same rows. @p out_row receives @c width sRGB8 colours, not ink
+ * codes, so the row goes to neither epi_pack_row() nor epi_preview_push().
+ * There are no nominal colours.
+ *
+ * Rows become ready as for epi_converter_pop(), and pushes follow the same
+ * contract. A converter pops with one function: once a call of either pop has
+ * written a row, a call of the other returns EPI_ERR_INVALID_ARG and changes
+ * nothing.
+ *
+ * @return EPI_OK if a row was written; EPI_ERR_INVALID_ARG for a NULL
+ *         argument, or after epi_converter_pop() has written a row;
+ *         EPI_ERR_FINISHED if all @c height rows have been popped;
+ *         EPI_ERR_NOT_READY if none is ready yet.
+ */
+epi_err_t epi_converter_pop_undithered(epi_converter_t* c, epi_rgb_t* out_row);
 
 /* ---- Resampler: source rows in, panel-sized rows out --------------------- */
 
