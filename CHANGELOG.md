@@ -3,6 +3,37 @@
 All notable changes to **epaper-image** are documented in this file. The project
 follows [semantic versioning](https://semver.org/).
 
+## v0.6.0
+
+Adds a runtime version call and a calibration ID on every panel, so a stored
+frame can be checked against the library and calibration that would render it
+now. The API is otherwise unchanged.
+
+**Panel output:** unchanged.
+
+### Added
+
+- `epi_version()` returns the version of the library linked, packed as
+  `major << 16 | minor << 8 | patch`; the `EPI_VERSION_*` macros give the
+  version of the header compiled against.
+- `epi_panel_t.id`, 16 bytes identifying the calibration inputs that can change
+  the bits sent to the panel: the kind, size, each ink's code and measured
+  colour, the detail sigma and the neutral-cast knots. The name, nominal colours
+  and presets are not part of it. `epi_grey_panel_init` and
+  `epi_colour_panel_init` compute it, and the built-in panels carry the same
+  value. It does not change with the rendering algorithm, so a frame is current
+  while the pair (library version, ID) is unchanged. All zeros means unknown, as
+  in a hand-built panel. The bytes are opaque: compare them, but don't rely on
+  how they are computed.
+
+### Changed
+
+- `epi_panel_t` gains the `id` member at its end, so the panel storage that
+  `epi_grey_panel_size` and `epi_colour_panel_size` report grows slightly.
+- Firmware that uses only the built-in panels no longer links
+  `epi_grey_panel_init`: the grey presets have their own file. The hash behind
+  the ID links only with the inits.
+
 ## v0.5.0
 
 Lays out a chosen region of the source, adds an undithered pop for quick
