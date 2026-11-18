@@ -28,9 +28,18 @@ extern "C" {
 /** @brief Library major version. */
 #define EPI_VERSION_MAJOR 0
 /** @brief Library minor version. */
-#define EPI_VERSION_MINOR 5
+#define EPI_VERSION_MINOR 6
 /** @brief Library patch version. */
 #define EPI_VERSION_PATCH 0
+
+/**
+ * @brief The version of the library linked, as opposed to the EPI_VERSION_*
+ *        macros, which give the version of the header compiled against.
+ *
+ * @return `EPI_VERSION_MAJOR << 16 | EPI_VERSION_MINOR << 8 | EPI_VERSION_PATCH`
+ *         as the library was built, e.g. 0x000600 for 0.6.0.
+ */
+uint32_t epi_version(void);
 
 /**
  * @brief Error codes returned by library functions.

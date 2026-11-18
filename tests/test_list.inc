@@ -1,6 +1,7 @@
 /* Every test, in run order; included by test_list.c with EPI_TEST defined
  * to declare each test and to run it. */
 EPI_TEST(test_strerror)
+EPI_TEST(test_version)
 EPI_TEST(test_math_round_shift)
 EPI_TEST(test_math_cbrt_q16_table)
 EPI_TEST(test_math_cbrt_q16)
