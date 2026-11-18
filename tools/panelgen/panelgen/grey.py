@@ -25,10 +25,10 @@ from pathlib import Path
 
 from . import REPO
 from .gen import (COMMAND, MAX_INKS, MAX_KERNEL_RADIUS, RULES, _block, _digest, _flt, _header, _row, kernel_q15,
-                  midtone_monotone, srgb_inputs, srgb_tables)
+                  midtone_monotone, render_id, srgb_inputs, srgb_tables)
 from .panels import GreyPanel
 
-GREY_FORMAT_VERSION = 2  # bump when the emitted layout or a rule changes (part of the input hash)
+GREY_FORMAT_VERSION = 3  # bump when the emitted layout or a rule changes (part of the input hash)
 GREY_RULES = {
     "level_y": "Y_i = sum_c srgb_to_xyz_q16[1][c] * srgb_to_lin_q16[m_c] (Q32, exact); "
                "level_y_i = (Y_i * 2^16 + Y_last / 2) / Y_last (integer)",
@@ -162,6 +162,15 @@ def kernel_c(sigma_f: float) -> list[int]:
 
 # -- derivation ------------------------------------------------------------------
 
+def grey_panel_id(width: int, height: int, levels, sigma: float) -> bytes:
+    """src/epi_panel_id.c for a grey panel: SHA-256 of the canonical serialisation, first 16 bytes."""
+    blob = b"epi-panel-id-v1" + struct.pack("<BHHB", 1, width, height, len(levels))
+    for code, _nominal, measured in levels:
+        blob += struct.pack("<4B", code, *measured)
+    blob += struct.pack("<f", sigma) + struct.pack("<B", 0)  # sigma's binary32 bits; no neutral knots
+    return hashlib.sha256(blob).digest()[:16]
+
+
 def measured_y_q32(rgb, lin, xyz) -> int:
     return sum(xyz[1][c] * lin[rgb[c]] for c in range(3))
 
@@ -175,6 +184,7 @@ class GreyTables:
     level_y: list[int]
     level_thr: list[int]
     lstar_min_q8: int
+    id: bytes  # epi_panel_t.id
 
 
 def derive_grey(panel: GreyPanel, mode: str, entry: dict) -> GreyTables:
@@ -237,7 +247,8 @@ def derive_grey(panel: GreyPanel, mode: str, entry: dict) -> GreyTables:
     assert r <= MAX_KERNEL_RADIUS and sum(kern) == 32768 and kern == kern[::-1]
     assert level_y[-1] == 65536 and all(a <= t < b for a, t, b in zip(level_y, thr, level_y[1:]))
     return GreyTables(ident=ident, mode=mode, levels=levels, kernel=kern, level_y=level_y,
-                      level_thr=thr, lstar_min_q8=lmin)
+                      level_thr=thr, lstar_min_q8=lmin,
+                      id=grey_panel_id(panel.width, panel.height, levels, sigma))
 
 
 # -- input -----------------------------------------------------------------------
@@ -375,6 +386,7 @@ def render_grey(panel: GreyPanel, lv: Levels, allow_placeholder: bool = False) -
         out.append("    .presets = epi_grey_presets,")
         out.append("    .preset_count = EPI_GREY_PRESET_COUNT,")
         out.append(f"    .tables = &{sid}_tables.base,")
+        out.append(render_id(t.id))
         out += ["};", ""]
     return "\n".join(out), tabs
 

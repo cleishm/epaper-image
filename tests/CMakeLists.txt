@@ -30,6 +30,8 @@ add_executable(epaper_image_tests
     test_runner.c
     test_list.c
     test_strerror.c
+    test_version.c
+    test_panel_id.c
     test_math.c
     test_dither.c
     test_intent.c

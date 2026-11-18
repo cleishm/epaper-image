@@ -3,8 +3,8 @@
 panelgen generates the C library's constant tables (docs/design.md, "Panel
 tables"). Colour panels come from the library's own derivation:
 `panelgen/gen.py` compiles `colour_tables.c` with `src/epi_colour_panel.c` and the
-sources it links, runs it on the panel's inks, σ and neutral-cast knots, and renders
-the integers it prints as C. `panelgen/grey.py` computes and renders grey calibrations, and
+sources it links, runs it on the panel's size, inks, codes, σ and neutral-cast knots,
+and renders the integers and panel ID it prints as C. `panelgen/grey.py` computes and renders grey calibrations, and
 `panelgen/colour.py` holds the sRGB constants behind `src/epi_srgb.c`.
 
 Set up this tool's venv first, from `tools/panelgen` (only pytest; see
@@ -89,7 +89,7 @@ from the JSON entries `gdey075t7_mono` and `gdey075t7_grey4`: `perceived` is
 the measured sRGB8 (darkest first), plus `nominal` and `codes`. The panel
 definition in `panelgen/panels.py` (`GDEY075T7`) gives the rest: name
 "GDEY075T7", 800x480 and σ 5.0. Its presets are the library's
-`epi_grey_presets` (`src/epi_grey_panel.c`), which the generated file references
+`epi_grey_presets` (`src/epi_grey_presets.c`), which the generated file references
 rather than defining its own.
 
 The tables are computed in `panelgen/grey.py`, which mirrors the C rules
@@ -105,6 +105,8 @@ exactly:
 - The validity rules are `derive_levels`'s: 2..16 levels, σ in (0, 10.5], Y
   strictly increasing in Q16, and `epi_midtone_monotone` of the darkest level's
   L\*. A JSON the runtime would reject is an error, and nothing is written.
+- The panel ID is the serialisation of `src/epi_panel_id.h`, hashed with
+  `hashlib` (docs/design.md "Panel ID").
 
 The generated header records:
 

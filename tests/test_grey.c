@@ -357,6 +357,28 @@ void test_grey_panel_storage(void) {
     free(buf);
 }
 
+/* The shipped grey calibrations are what init builds from their own fields,
+ * ID included (panelgen computes their IDs in Python). */
+void test_grey_panel_builtin(void) {
+    const epi_panel_t* ps[2] = {&epi_panel_gdey075t7_mono, &epi_panel_gdey075t7_grey4};
+    for (int k = 0; k < 2; k++) {
+        const epi_panel_t* g = ps[k];
+        epi_grey_panel_config_t cfg = {g->name, g->width, g->height, g->inks, g->ink_count, g->detail_sigma};
+        size_t size = epi_grey_panel_size(&cfg);
+        TEST_ASSERT_TRUE(size != 0 && size <= sizeof scratch_storage.bytes);
+        const epi_panel_t* p = NULL;
+        TEST_ASSERT_EQUAL_INT(EPI_OK, epi_grey_panel_init(&cfg, scratch_storage.bytes, size, &p, NULL));
+        const epi_grey_tables_t *a = epi_grey_tables(g->tables), *b = epi_grey_tables(p->tables);
+        TEST_ASSERT_EQUAL_UINT8(b->base.kind, a->base.kind);
+        TEST_ASSERT_EQUAL_UINT8(b->base.ink_count, a->base.ink_count);
+        TEST_ASSERT_EQUAL_UINT8(b->base.kernel_radius, a->base.kernel_radius);
+        TEST_ASSERT_EQUAL_UINT16_ARRAY(a->base.kernel, b->base.kernel, 2 * EPI_MAX_KERNEL_RADIUS + 1);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(a->level_y, b->level_y, EPI_MAX_INKS);
+        TEST_ASSERT_EQUAL_INT32_ARRAY(a->level_thr, b->level_thr, EPI_MAX_INKS - 1);
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(g->id, p->id, sizeof p->id);
+    }
+}
+
 /* Derived tables: level Y, thresholds, the kernel rule. */
 void test_grey_panel_tables(void) {
     const epi_panel_t* ps[3] = {panel2(), panel4(), panel16()};

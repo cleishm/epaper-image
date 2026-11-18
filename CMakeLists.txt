@@ -5,7 +5,8 @@ if(ESP_PLATFORM)
     idf_component_register(
         SRCS "src/epaper_image.c" "src/epi_math.c" "src/epi_srgb.c"
              "src/epi_intent.c" "src/epi_dither.c" "src/epi_converter.c"
-             "src/epi_grey_panel.c" "src/epi_colour_panel.c" "src/epi_resampler.c" "src/epi_preview.c"
+             "src/epi_grey_panel.c" "src/epi_grey_presets.c" "src/epi_colour_panel.c"
+             "src/epi_panel_id.c" "src/epi_sha256.c" "src/epi_resampler.c" "src/epi_preview.c"
              "src/panels/el133uf1.c" "src/panels/gdey075t7.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "src"
@@ -19,7 +20,7 @@ if(ESP_PLATFORM)
 endif()
 
 project(epaper_image
-    VERSION 0.5.0
+    VERSION 0.6.0
     DESCRIPTION "Image conversion for e-paper panels"
     HOMEPAGE_URL "https://github.com/cleishm/epaper-image"
     LANGUAGES C
@@ -55,7 +56,10 @@ add_library(epaper_image STATIC
     src/epi_dither.c
     src/epi_converter.c
     src/epi_grey_panel.c
+    src/epi_grey_presets.c
     src/epi_colour_panel.c
+    src/epi_panel_id.c
+    src/epi_sha256.c
     src/epi_resampler.c
     src/epi_preview.c
     src/panels/el133uf1.c

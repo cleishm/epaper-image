@@ -4,6 +4,8 @@ idf_component_register(
     SRCS "app_main.c"
          "${T}/test_list.c"
          "${T}/test_strerror.c"
+         "${T}/test_version.c"
+         "${T}/test_panel_id.c"
          "${T}/test_math.c"
          "${T}/test_dither.c"
          "${T}/test_intent.c"

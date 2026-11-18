@@ -5,8 +5,8 @@
  * writes grey_equiv_cases.h: the levels straight from the JSON and the
  * generated panels to compare. For each case this builds the same panel at
  * runtime with epi_grey_panel_init and requires every field of the tables,
- * the levels and the panel fields to be identical and the presets to be the
- * same, then runs
+ * the levels and the panel fields (the ID included) to be identical and the
+ * presets to be the same, then runs
  * both panels through the converter and the preview reducer and requires
  * byte-identical output.
  * Prints one line per case; exit status is the number of mismatches.
@@ -174,6 +174,9 @@ int main(void) {
         }
         if (g->presets != rt->presets || g->preset_count != rt->preset_count) {
             fail(id, "presets");
+        }
+        if (memcmp(g->id, rt->id, sizeof g->id) != 0) {
+            fail(id, "id");
         }
 
         /* Both panels through the converter, every preset, codes and preview. */

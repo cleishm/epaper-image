@@ -70,6 +70,16 @@ typedef union {
 } storage_t;
 
 /* Built off alignment on purpose: the storage needs no particular alignment. */
+static const epi_panel_t* build_cfg(storage_t* st, const epi_colour_panel_config_t* cfg) {
+    size_t size = epi_colour_panel_size(cfg);
+    TEST_ASSERT_NOT_EQUAL(0, size);
+    TEST_ASSERT_TRUE(size + 3 <= sizeof st->bytes);
+    const epi_panel_t* p = NULL;
+    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_colour_panel_init(cfg, st->bytes + 3, size, &p, NULL));
+    TEST_ASSERT_NOT_NULL(p);
+    return p;
+}
+
 static const epi_panel_t* build_neutral(
     storage_t* st,
     const epi_ink_t* inks,
@@ -79,13 +89,7 @@ static const epi_panel_t* build_neutral(
     size_t knot_count
 ) {
     epi_colour_panel_config_t cfg = {"TEST", 640, 480, inks, n, sigma, NULL, NULL, knots, knot_count};
-    size_t size = epi_colour_panel_size(&cfg);
-    TEST_ASSERT_NOT_EQUAL(0, size);
-    TEST_ASSERT_TRUE(size + 3 <= sizeof st->bytes);
-    const epi_panel_t* p = NULL;
-    TEST_ASSERT_EQUAL_INT(EPI_OK, epi_colour_panel_init(&cfg, st->bytes + 3, size, &p, NULL));
-    TEST_ASSERT_NOT_NULL(p);
-    return p;
+    return build_cfg(st, &cfg);
 }
 
 static const epi_panel_t* build(storage_t* st, const epi_ink_t* inks, size_t n, float sigma) {
@@ -111,18 +115,16 @@ static const epi_neutral_knot_t el133_neutral[14] = {
     {93.4f, 0.0f, 0.0f},
 };
 
+/* The shipped panel's inputs, so its ID matches too. */
 static const epi_panel_t* panel_el133(void) {
     static storage_t st;
     static const epi_panel_t* p;
     if (p == NULL) {
-        p = build_neutral(
-            &st,
-            epi_panel_el133uf1.inks,
-            epi_panel_el133uf1.ink_count,
-            epi_panel_el133uf1.detail_sigma,
-            el133_neutral,
-            14
-        );
+        const epi_panel_t* g = &epi_panel_el133uf1;
+        const epi_colour_panel_config_t cfg = {
+            g->name, g->width, g->height, g->inks, g->ink_count, g->detail_sigma, NULL, NULL, el133_neutral, 14
+        };
+        p = build_cfg(&st, &cfg);
     }
     return p;
 }
@@ -366,6 +368,7 @@ void test_colour_panel_el133uf1(void) {
     TEST_ASSERT_EQUAL_size_t(6, p->ink_count);
     TEST_ASSERT_EQUAL_MEMORY(epi_panel_el133uf1.inks, p->inks, 6 * sizeof p->inks[0]);
     assert_tables_equal_generated(p);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(epi_panel_el133uf1.id, p->id, sizeof p->id);
 }
 
 /* ---- the neutral cast ------------------------------------------------------------ */

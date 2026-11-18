@@ -1,5 +1,9 @@
 #include "epaper_image.h"
 
+uint32_t epi_version(void) {
+    return (uint32_t)EPI_VERSION_MAJOR << 16 | (uint32_t)EPI_VERSION_MINOR << 8 | (uint32_t)EPI_VERSION_PATCH;
+}
+
 const char* epi_strerror(epi_err_t err) {
     switch (err) {
     case EPI_OK:

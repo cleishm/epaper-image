@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -283,3 +284,13 @@ def test_gate_catches_a_one_lsb_change(tmp_path, libobjs, old, new, field):
         return text.replace(old, new, 1)
     rc, out = _gate(tmp_path, libobjs, PLACEHOLDER, allow_placeholder=True, tamper=tamper)
     assert rc != 0 and f": {field}" in out, out
+
+
+@needs_cc
+def test_gate_catches_a_changed_id(tmp_path, libobjs):
+    def tamper(text):
+        m = re.search(r"\.id =\n        \{\n            0x([0-9a-f]{2})", text)
+        assert m
+        return text[:m.start(1)] + f"{int(m.group(1), 16) ^ 1:02x}" + text[m.end(1):]
+    rc, out = _gate(tmp_path, libobjs, PLACEHOLDER, allow_placeholder=True, tamper=tamper)
+    assert rc != 0 and ": id" in out, out

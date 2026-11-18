@@ -1,10 +1,12 @@
 """panelgen: the rendered tables, bad inks and byte-identical regeneration. What the
 tables hold is the library's: tests/test_colour_panel.c holds them to the runtime panel."""
 
+import hashlib
 import json
 import math
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from dataclasses import replace
@@ -13,8 +15,8 @@ import pytest
 
 from panelgen import PANELGEN_DIR, REPO, PanelError
 from panelgen.__main__ import main
-from panelgen.gen import (_colour_tables_program, check_presets, derive, kernel_q15, outputs, panel_inputs, q,
-                          render_panel, render_srgb)
+from panelgen.gen import (_colour_tables_program, check_presets, derive, kernel_q15, neutral_json, outputs,
+                          panel_inputs, q, render_panel, render_srgb)
 from panelgen.palette import BUILTIN_TABLES
 from panelgen.panels import EL133UF1, PANELS, Panel, Preset
 
@@ -151,6 +153,22 @@ def test_rendered_values_match_derived(t):
     for f in ("lin_to_panel_adapt", "ink_oklab", "hull_n", "neutral_q8"):
         assert _ints_after(text, f) == [v for row in t.ints[f] for v in row], f
     assert ".has_neutral = 1," in text
+
+
+def test_id_is_the_canonical_serialisation(t):
+    # src/epi_panel_id.h, written out independently of the C.
+    p = EL133UF1
+    entries = BUILTIN_TABLES[p.palette][p.table]
+    knots = neutral_json(p)["knots"]
+    blob = b"epi-panel-id-v1" + struct.pack("<BHHB", 2, p.width, p.height, len(entries))
+    for code, (_nominal, measured) in zip(p.codes, entries.values()):
+        blob += struct.pack("<4B", code, *measured)
+    blob += struct.pack("<fB", p.detail_sigma, len(knots))
+    blob += b"".join(struct.pack("<f", v if v != 0 else 0.0) for k in knots for v in k)  # -0 as +0
+    assert t.ints["id"] == list(hashlib.sha256(blob).digest()[:16])
+    text = outputs([EL133UF1])["src/panels/el133uf1.c"][0]
+    m = re.search(r"\.id =\n        \{\n(.*?)\n        \},\n", text, re.S)
+    assert [int(v, 16) for v in re.findall(r"0x([0-9a-f]{2})", m.group(1))] == t.ints["id"]
 
 
 def _with_neutral(tmp_path, data):
