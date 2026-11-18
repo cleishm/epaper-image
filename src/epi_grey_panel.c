@@ -10,6 +10,7 @@
 #include "epi_fp.h"
 #include "epi_intent.h"
 #include "epi_math.h"
+#include "epi_panel_id.h"
 #include "epi_panel_tables.h"
 #include "epi_srgb.h"
 
@@ -17,18 +18,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-#define GREY_INTENT(t) {.tone = (t), .detail = 0.75f, .adapt = 0.5f, .vibrance = 1.0f, .veil = 0.0f, .lift = 0.0f}
-
-static const epi_intent_t grey_intent_default = GREY_INTENT(0.5f);
-static const epi_intent_t grey_intent_soft = GREY_INTENT(0.0f);
-static const epi_intent_t grey_intent_deep = GREY_INTENT(1.0f);
-
-const epi_preset_t epi_grey_presets[EPI_GREY_PRESET_COUNT] = {
-    {"Default", &grey_intent_default},
-    {"Soft", &grey_intent_soft},
-    {"Deep", &grey_intent_deep},
-};
 
 /* What the caller's storage holds (placed at its first aligned address). */
 typedef struct {
@@ -149,6 +138,7 @@ epi_err_t epi_grey_panel_init(
     p->presets = epi_grey_presets;
     p->preset_count = EPI_GREY_PRESET_COUNT;
     p->tables = &t->base;
+    epi_panel_id(p->id, EPI_PANEL_GREY, p->width, p->height, s->levels, n, p->detail_sigma, NULL, 0);
     *out = p;
     return EPI_OK;
 }

@@ -70,7 +70,7 @@ PANELS = {p.ident: p for p in (EL133UF1,)}
 # measured levels JSON (panelgen/grey.py), passed with --levels. One
 # GreyPanel is one glass and one generated file, holding a calibration per
 # mode (epi_panel_<ident>_<mode>, design.md "Grey panels"). Its presets are
-# the library's epi_grey_presets (src/epi_grey_panel.c).
+# the library's epi_grey_presets (src/epi_grey_presets.c).
 
 
 @dataclass(frozen=True)

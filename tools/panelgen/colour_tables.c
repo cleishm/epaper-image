@@ -2,11 +2,12 @@
  * The tables of one colour panel as JSON on stdout, from the library's own
  * derivation: panelgen renders them as C (panelgen/gen.py).
  *
- *   colour_tables SIGMA K [L A B ...] R G B NR NG NB [R G B NR NG NB ...]
+ *   colour_tables W H SIGMA K [L A B ...] C R G B NR NG NB [C R G B NR NG NB ...]
  *
- * K is the number of neutral-cast knots, each L* a* b*, that follow. R G B is each
- * ink's measured sRGB8 and NR NG NB its nominal. Exits 1 with the reason on stderr
- * if epi_colour_panel_init refuses the inks, sigma or knots.
+ * W H is the native size. K is the number of neutral-cast knots, each L* a* b*, that
+ * follow. C is each ink's code, R G B its measured sRGB8 and NR NG NB its nominal.
+ * The panel ID is the one epi_colour_panel_init computes. Exits 1 with the reason on
+ * stderr if epi_colour_panel_init refuses the inks, sigma or knots.
  */
 #include "epaper_image.h"
 #include "epi_panel_tables.h"
@@ -45,27 +46,37 @@ static int refuse(const char* why) {
 }
 
 int main(int argc, char** argv) {
-    const int k = argc >= 3 ? atoi(argv[2]) : -1;
-    if (k < 0 || argc < 3 + 3 * k || (argc - 3 - 3 * k) % 6 != 0) {
-        fprintf(stderr, "usage: colour_tables SIGMA K [L A B ...] R G B NR NG NB [R G B NR NG NB ...]\n");
+    const int k = argc >= 5 ? atoi(argv[4]) : -1;
+    if (k < 0 || argc < 5 + 3 * k || (argc - 5 - 3 * k) % 7 != 0) {
+        fprintf(stderr, "usage: colour_tables W H SIGMA K [L A B ...] C R G B NR NG NB [C R G B NR NG NB ...]\n");
         return 2;
     }
     static epi_neutral_knot_t knots[EPI_MAX_NEUTRAL_KNOTS + 1];
     for (int i = 0; i < k && i <= EPI_MAX_NEUTRAL_KNOTS; i++) {
-        char** v = argv + 3 + 3 * i;
+        char** v = argv + 5 + 3 * i;
         knots[i] = (epi_neutral_knot_t){strtof(v[0], NULL), strtof(v[1], NULL), strtof(v[2], NULL)};
     }
-    char** ink_args = argv + 3 + 3 * k;
-    const size_t n = (size_t)(argc - 3 - 3 * k) / 6;
+    char** ink_args = argv + 5 + 3 * k;
+    const size_t n = (size_t)(argc - 5 - 3 * k) / 7;
     static epi_ink_t inks[EPI_MAX_INKS];
     for (size_t i = 0; i < n && i < EPI_MAX_INKS; i++) {
-        char** v = ink_args + 6 * i;
-        inks[i].measured = (epi_rgb_t){(uint8_t)atoi(v[0]), (uint8_t)atoi(v[1]), (uint8_t)atoi(v[2])};
-        inks[i].nominal = (epi_rgb_t){(uint8_t)atoi(v[3]), (uint8_t)atoi(v[4]), (uint8_t)atoi(v[5])};
+        char** v = ink_args + 7 * i;
+        inks[i].code = (uint8_t)atoi(v[0]);
+        inks[i].measured = (epi_rgb_t){(uint8_t)atoi(v[1]), (uint8_t)atoi(v[2]), (uint8_t)atoi(v[3])};
+        inks[i].nominal = (epi_rgb_t){(uint8_t)atoi(v[4]), (uint8_t)atoi(v[5]), (uint8_t)atoi(v[6])};
     }
 
     const epi_colour_panel_config_t cfg = {
-        "panelgen", 1, 1, inks, n, strtof(argv[1], NULL), NULL, NULL, k ? knots : NULL, (size_t)k
+        "panelgen",
+        (uint16_t)atoi(argv[1]),
+        (uint16_t)atoi(argv[2]),
+        inks,
+        n,
+        strtof(argv[3], NULL),
+        NULL,
+        NULL,
+        k ? knots : NULL,
+        (size_t)k
     };
     const size_t size = epi_colour_panel_size(&cfg);
     void* storage = size ? malloc(size) : NULL;
@@ -100,6 +111,10 @@ int main(int argc, char** argv) {
     printf("\"has_neutral\": %u,\n\"neutral_q8\": [", (unsigned)t->has_neutral);
     for (int i = 0; i < EPI_NEUTRAL_LEN; i++) {
         printf("%s[%d, %d]", i ? ", " : "", t->neutral_q8[i][0], t->neutral_q8[i][1]);
+    }
+    printf("],\n\"id\": [");
+    for (size_t i = 0; i < sizeof panel->id; i++) {
+        printf("%s%u", i ? ", " : "", (unsigned)panel->id[i]);
     }
     printf("]\n}\n");
     return 0;

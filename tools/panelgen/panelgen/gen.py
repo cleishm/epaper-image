@@ -27,7 +27,7 @@ from .palette import BUILTIN_TABLES
 from .panels import Panel
 
 COMMAND = "cd tools/panelgen && python -m panelgen"
-FORMAT_VERSION = 2  # bump when the emitted layout changes (part of the input hash)
+FORMAT_VERSION = 3  # bump when the emitted layout changes (part of the input hash)
 # Part of the hash of src/epi_srgb.c and of every grey glass.
 RULES = {
     "round": "q(x, bits) = sign(x) * floor(|x| * 2^bits + 0.5)",
@@ -37,7 +37,8 @@ RULES = {
 }
 COLOUR_DERIVATION = REPO / "src" / "epi_colour_panel.c"
 COLOUR_SOURCES = (PANELGEN_DIR / "colour_tables.c", COLOUR_DERIVATION, REPO / "src" / "epi_intent.c",
-                  REPO / "src" / "epi_math.c", REPO / "src" / "epi_srgb.c")
+                  REPO / "src" / "epi_math.c", REPO / "src" / "epi_srgb.c", REPO / "src" / "epi_panel_id.c",
+                  REPO / "src" / "epi_sha256.c")
 
 
 def q(x: float, bits: int) -> int:
@@ -134,11 +135,13 @@ def derive(panel: Panel) -> Derived:
     if len(panel.codes) != len(panel.ink_names):
         raise PanelError(f"{panel.name}: {len(panel.codes)} codes for {len(panel.ink_names)} inks")
     check_presets(panel)
-    # Each ink as measured R G B then nominal R G B; entries hold (nominal, measured).
-    inks = [str(v) for nominal, measured in entries.values() for v in (*measured, *nominal)]
+    # Each ink as code, measured R G B, then nominal R G B; entries hold (nominal, measured).
+    inks = [str(v) for code, (nominal, measured) in zip(panel.codes, entries.values())
+            for v in (code, *measured, *nominal)]
     neutral = neutral_json(panel)
     knots = neutral["knots"] if neutral else []
-    args = [repr(panel.detail_sigma), str(len(knots)), *(repr(float(v)) for k in knots for v in k), *inks]
+    args = [str(panel.width), str(panel.height), repr(panel.detail_sigma), str(len(knots)),
+            *(repr(float(v)) for k in knots for v in k), *inks]
     r = subprocess.run([_colour_tables_program(), *args], capture_output=True, text=True)
     if r.returncode == 1:  # the inks, sigma or knots; anything else is a bug
         raise PanelError(f"{panel.name}: {r.stderr.strip()}")
@@ -213,6 +216,11 @@ def _mat(name: str, m, indent="    ", fmt=str) -> str:
 def _flt(v: float) -> str:
     s = repr(float(v))
     return s + "f"
+
+
+def render_id(panel_id) -> str:
+    """The `.id` member of a generated epi_panel_t: 16 bytes in hex."""
+    return "    .id =\n        {\n" + _block(list(panel_id), 8, "            ", lambda v: f"0x{v:02x}") + "\n        },"
 
 
 def srgb_tables() -> tuple[list[int], list[list[int]]]:
@@ -304,6 +312,7 @@ def render_panel(t: Derived) -> tuple[str, str]:
     out.append(f"    .presets = {pid}_presets,")
     out.append(f"    .preset_count = {len(p.presets)},")
     out.append(f"    .tables = &{pid}_tables.base,")
+    out.append(render_id(I["id"]))
     out += ["};", ""]
     return sha, "\n".join(out)
 

@@ -142,6 +142,20 @@ typedef struct epi_panel {
     const epi_preset_t* presets;
     size_t preset_count;
     const epi_panel_tables_t* tables;
+    /**
+     * Identifies the calibration inputs that can change the bits sent to the
+     * panel: the kind, the size, each ink's code and measured colour, sigma and
+     * the neutral-cast knots. Grey calibrations are told apart by their
+     * measured levels and codes, so two waveforms' calibrations of one glass
+     * share an ID only when those match. All zeros means unknown, e.g. a
+     * hand-built panel.
+     *
+     * It does not cover the rendering algorithm, so pair it with epi_version()
+     * to tell whether a stored frame is current, nor the mapping from preset
+     * names to intents. The bytes are opaque: compare them, but don't rely on
+     * how they are computed.
+     */
+    uint8_t id[16];
 } epi_panel_t;
 
 /**

@@ -106,7 +106,7 @@ static inline const epi_grey_tables_t* epi_grey_tables(const epi_panel_tables_t*
     return (const epi_grey_tables_t*)t;
 }
 
-/* Every grey panel's presets, runtime or generated (src/epi_grey_panel.c):
+/* Every grey panel's presets, runtime or generated (src/epi_grey_presets.c):
  * the colour presets' tones without Bright, at lift 0. */
 #define EPI_GREY_PRESET_COUNT 3
 extern const epi_preset_t epi_grey_presets[EPI_GREY_PRESET_COUNT];

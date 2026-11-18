@@ -11,6 +11,7 @@
 #include "epi_fp.h"
 #include "epi_intent.h"
 #include "epi_math.h"
+#include "epi_panel_id.h"
 #include "epi_panel_tables.h"
 
 #include <stdbool.h>
@@ -738,6 +739,9 @@ epi_err_t epi_colour_panel_init(
     p->presets = epi_colour_presets;
     p->preset_count = EPI_COLOUR_PRESET_COUNT;
     p->tables = &t->base;
+    epi_panel_id(
+        p->id, EPI_PANEL_COLOUR, p->width, p->height, s->inks, n, p->detail_sigma, cfg->neutral, cfg->neutral_count
+    );
     *out = p;
     return EPI_OK;
 }

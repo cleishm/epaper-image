@@ -199,8 +199,8 @@ described under S1.
 
 `epi_panel_t` is const data: a name, the native size, the inks, the detail
 blur σ (`detail_sigma`, informational: the kernel in the tables is what
-runs), a list of named presets with the default first, and a pointer to the
-derived tables (`src/epi_panel_tables.h`). It points at an
+runs), a list of named presets with the default first, a pointer to the
+derived tables (`src/epi_panel_tables.h`) and an ID (see [Panel ID](#panel-id)). It points at an
 `epi_panel_tables_t`, which holds what both kinds read: the kind, the ink count
 and the detail kernel (Q15 taps −r..r). That is the first member of the kind's
 own struct, `epi_colour_tables_t` or `epi_grey_tables_t`, and the code casts to
@@ -1202,14 +1202,15 @@ A built-in colour panel's tables come from the library's own derivation
 ([Colour panels from inks](#colour-panels-from-inks)). panelgen compiles
 `tools/panelgen/colour_tables.c` with `src/epi_colour_panel.c` and the sources it
 links, with the library's floating-point flags, and that program runs
-`epi_colour_tables_derive` and `epi_gaussian_kernel_q15` on the panel's inks and σ,
-and on the knots of its neutral-cast JSON if `panels.py` names one (`neutral`). The
+`epi_colour_panel_init` on the panel's size, inks, codes and σ, and on the knots of
+its neutral-cast JSON if `panels.py` names one (`neutral`), and prints the tables
+and the ID. The
 EL133UF1's is `tools/panelgen/measurements/el133uf1-neutral-2026-11-05.json`,
 `{"panel", "source", "knots": [[L*, a*, b*], ...]}`. `gen.py` renders the integers
 the program prints, beside the panel's own presets. Generating
 a colour panel therefore needs a C compiler, and gives the panel
-`epi_colour_panel_init` builds from the same inks and σ: `test_colour_panel_el133uf1`
-requires every table field to match, on every target the suite runs on.
+`epi_colour_panel_init` builds from the same inputs: `test_colour_panel_el133uf1`
+requires every table field and the ID to match, on every target the suite runs on.
 
 Inks, a σ or knots the derivation refuses, or presets `epi_intent_init` would
 refuse, fail generation with the reason, and nothing is written.
@@ -1249,11 +1250,45 @@ for that waveform. A JSON marked as a placeholder is refused unless
 exact integers from the same Q16 sRGB tables, and the thresholds and kernel
 with line-by-line transcriptions of `epi_cbrt_d` and `epi_exp_d` in the C's
 order of double operations (Python floats are IEEE doubles and CPython does
-not fuse operations). The test gate compiles each generated file with the
-library and requires every table field, the levels and the converter output
-to equal what `epi_grey_panel_init` builds at runtime from the same levels.
-Generated grey panels define no presets of their own; they reference
-`epi_grey_presets`, so linking one also links `epi_grey_panel.c`.
+not fuse operations). It computes the ID with `hashlib` and `struct`. The test
+gate compiles each generated file with the library and requires every table
+field, the levels, the ID and the converter output to equal what
+`epi_grey_panel_init` builds at runtime from the same levels, and
+`test_grey_panel_builtin` checks the shipped ones on every target. Generated grey
+panels define no presets of their own; they reference `epi_grey_presets`, which
+has its own file (`src/epi_grey_presets.c`) so that linking a generated panel
+does not link `epi_grey_panel_init`.
+
+### Panel ID
+
+`epi_panel_t.id` is 16 bytes that identify the calibration inputs that can change
+the bits sent to the panel, so firmware can tell whether a stored frame was
+rendered for the panel it has. A frame is current while the pair (library
+version, ID) is unchanged: the ID does not cover the rendering algorithm, which
+`epi_version()` stands for, nor the mapping from preset names to intents, which a
+caller that stores frames by preset name must track itself.
+
+The ID is the first 16 bytes of the SHA-256 of a canonical serialisation, in
+which every integer is little-endian: the ASCII tag `epi-panel-id-v1`, the kind
+(1 grey, 2 colour), the width and height (u16 each), the ink count (u8) and each
+ink's code and measured sRGB8 (u8 each), σ's binary32 bits, and the neutral-cast
+knot count (u8, 0 for grey) and each knot's L\*, a\* and b\* binary32 bits, with
+−0 written as +0 since init treats the two alike. What is in is exactly what
+reaches the panel bits: the codes are what the panel is sent, the measured
+colours and knots drive the tables, σ the kernel, and a frame is rendered at
+the size. The names are out, because they change nothing, and so
+are the nominal colours, which reach only nominal previews and a colour init's
+checks of which inks are white and black: those accept or refuse inks but change
+no table. A grey calibration's waveform is told apart by its measured levels and
+codes, so two waveforms' calibrations of one glass share an ID only when those
+match. The bytes are opaque: callers compare them, and the serialisation is not
+a contract, so the tag can change with it.
+
+Init computes the ID after validation, from the values it keeps; panelgen writes
+the same bytes into generated panels (the colour ones from the library's own
+code). The hash is in its own files (`src/epi_sha256.c`, `src/epi_panel_id.c`),
+reached only from the two inits, so firmware that uses only const panels does not
+link it. All zeros means unknown, as in a hand-built `epi_panel_t`.
 
 ### Adding a panel
 
